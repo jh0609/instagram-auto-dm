@@ -10,6 +10,8 @@ process.env.SQLITE_PATH = './data/verify.sqlite';
 process.env.PUBLIC_COMMENT_REPLY_ENABLED = 'false';
 process.env.ADMIN_TOKEN = 'verify-admin-token';
 process.env.PORT = '0';
+process.env.IG_BUSINESS_ID = '';
+process.env.IG_BUSINESS_ACCESS_TOKEN = '';
 
 const { db, initDatabase } = require('../src/db');
 const { findMatchingRule, renderTemplate } = require('../src/replyService');
@@ -141,6 +143,15 @@ async function verifyAdminRoutes() {
     });
     const logsBody = await logs.json();
     assert(logs.status === 200 && Array.isArray(logsBody.data), 'admin logs API should return data array');
+
+    const mediaWithoutConfig = await fetch(`${baseUrl}/admin/api/media`, {
+      headers: { Authorization: 'Bearer verify-admin-token' }
+    });
+    const mediaWithoutConfigBody = await mediaWithoutConfig.json();
+    assert(
+      mediaWithoutConfig.status === 500 && /IG_BUSINESS/.test(mediaWithoutConfigBody.error),
+      'admin media API should return clear config error when Instagram credentials are missing'
+    );
 
     const testMatch = await fetch(`${baseUrl}/admin/api/test-match`, {
       method: 'POST',

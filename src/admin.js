@@ -1,6 +1,7 @@
 const express = require('express');
 const config = require('./config');
 const { db } = require('./db');
+const { fetchMedia } = require('./instagramApi');
 const { findMatchingRule, renderTemplate } = require('./replyService');
 
 function createAdminRouter() {
@@ -107,6 +108,30 @@ function createAdminRouter() {
     res.json({ data: rows });
   });
 
+  router.get('/api/media', async (req, res) => {
+    try {
+      const media = await fetchMedia(clampLimit(req.query.limit, 25, 100));
+      return res.json({ data: media });
+    } catch (error) {
+      return res.status(500).json({ error: error.message || 'Failed to fetch media' });
+    }
+  });
+
+  router.get('/api/media/resolve', async (req, res) => {
+    const permalink = normalizeNullableText(req.query.permalink);
+    if (!permalink) return res.status(400).json({ error: 'permalink is required' });
+
+    try {
+      const media = await fetchMedia(clampLimit(req.query.limit, 100, 100));
+      const normalizedPermalink = normalizePermalink(permalink);
+      const matched = media.find((item) => normalizePermalink(item.permalink) === normalizedPermalink);
+      if (!matched) return res.status(404).json({ error: 'Media not found' });
+      return res.json({ data: matched });
+    } catch (error) {
+      return res.status(500).json({ error: error.message || 'Failed to resolve media' });
+    }
+  });
+
   router.post('/api/test-match', (req, res) => {
     const mediaId = normalizeNullableText(req.body && req.body.media_id);
     const commentText = normalizeNullableText(req.body && req.body.comment_text) || '';
@@ -199,6 +224,10 @@ function normalizeNullableText(value) {
   return text === '' ? null : text;
 }
 
+function normalizePermalink(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
 function getRule(id) {
   return db.prepare(`
     SELECT id, media_id, keyword, reply_text, use_yn, created_at, updated_at,
@@ -252,6 +281,13 @@ function renderAdminPage(token) {
     <form id="ruleForm" class="grid">
       <input type="hidden" id="ruleId">
       <div><label>media_id</label><input id="mediaId" placeholder="empty = fallback"></div>
+      <div>
+        <label>게시글 URL로 찾기</label>
+        <div class="actions">
+          <input id="mediaPermalink" placeholder="https://www.instagram.com/p/...">
+          <button type="button" class="secondary" onclick="resolveMedia()">찾기</button>
+        </div>
+      </div>
       <div><label>keyword *</label><input id="keyword" required></div>
       <div class="span"><label>reply_text *</label><textarea id="replyText" required></textarea></div>
       <div class="span"><label>public_reply_text</label><textarea id="publicReplyText"></textarea></div>
@@ -262,8 +298,11 @@ function renderAdminPage(token) {
         <button type="submit">Save</button>
         <button type="button" class="secondary" onclick="resetRuleForm()">New</button>
         <button type="button" class="secondary" onclick="loadRules()">Refresh</button>
+        <button type="button" class="secondary" onclick="loadMedia()">게시글 불러오기</button>
       </div>
     </form>
+    <div id="mediaStatus" class="muted"></div>
+    <div id="mediaList"></div>
   </section>
 
   <section>
@@ -351,6 +390,47 @@ function renderAdminPage(token) {
     async function disableRule(id) {
       await api('/rules/' + id, { method: 'DELETE' });
       await loadRules();
+    }
+
+    async function loadMedia() {
+      const status = document.getElementById('mediaStatus');
+      status.textContent = 'Loading media...';
+      try {
+        const { data } = await api('/media?limit=25');
+        renderTable(document.getElementById('mediaList'), data, [
+          'id', 'caption', 'permalink', 'timestamp'
+        ], row => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'secondary';
+          button.textContent = 'Select';
+          button.addEventListener('click', () => {
+            setValue('mediaId', row.id);
+            status.textContent = 'Selected media_id: ' + row.id;
+          });
+          return button;
+        });
+        status.textContent = data.length ? 'Select a post to fill media_id.' : 'No media found.';
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    }
+
+    async function resolveMedia() {
+      const status = document.getElementById('mediaStatus');
+      const permalink = value('mediaPermalink');
+      if (!permalink) {
+        status.textContent = 'Enter a permalink.';
+        return;
+      }
+
+      try {
+        const { data } = await api('/media/resolve?permalink=' + encodeURIComponent(permalink));
+        setValue('mediaId', data.id);
+        status.textContent = 'Resolved media_id: ' + data.id;
+      } catch (error) {
+        status.textContent = error.message;
+      }
     }
 
     document.getElementById('ruleForm').addEventListener('submit', async event => {

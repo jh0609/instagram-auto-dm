@@ -44,6 +44,24 @@ async function fetchComments(mediaId) {
   return Array.isArray(data && data.data) ? data.data : [];
 }
 
+async function fetchMedia(limit = 25) {
+  requireValue(config.igBusinessId, 'IG_BUSINESS_ID');
+  requireValue(config.igBusinessAccessToken, 'IG_BUSINESS_ACCESS_TOKEN');
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 100);
+  const url = new URL(`https://graph.instagram.com/${config.igGraphVersion}/${config.igBusinessId}/media`);
+  url.searchParams.set('fields', 'id,caption,media_type,media_product_type,permalink,timestamp');
+  url.searchParams.set('limit', String(safeLimit));
+
+  const data = await fetchJson(url, {
+    headers: {
+      Authorization: `Bearer ${config.igBusinessAccessToken}`
+    }
+  });
+
+  return Array.isArray(data && data.data) ? data.data : [];
+}
+
 async function replyToComment(commentId, message) {
   requireValue(commentId, 'commentId');
   requireValue(message, 'message');
@@ -151,6 +169,7 @@ function formatApiError(error) {
 
 module.exports = {
   fetchComments,
+  fetchMedia,
   replyToComment,
   sendPrivateReply,
   formatApiError,

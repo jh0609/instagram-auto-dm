@@ -150,6 +150,8 @@ Admin API:
 - `PATCH /admin/api/rules/:id`
 - `DELETE /admin/api/rules/:id`
 - `GET /admin/api/logs`
+- `GET /admin/api/media?limit=25`
+- `GET /admin/api/media/resolve?permalink=...`
 - `POST /admin/api/test-match`
 
 `DELETE /admin/api/rules/:id`는 실제 삭제하지 않고 `enabled_yn='N'`으로 비활성화합니다. Rule 생성/수정 시 `keyword`, `reply_text`는 필수이며, `media_id` 빈 문자열은 `NULL`로 저장됩니다. `priority` 기본값은 `100`이고 `enabled_yn`은 `Y` 또는 `N`만 허용합니다.
@@ -169,6 +171,18 @@ curl -X POST http://localhost:3010/admin/api/test-match \
 ```
 
 응답에는 `matched`, `rule_id`, `keyword`, 렌더링된 `reply_text`, 렌더링된 `public_reply_text`, `resource_url`이 포함됩니다.
+
+게시글 ID 조회:
+
+```bash
+curl "http://localhost:3010/admin/api/media?limit=25" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+
+curl "http://localhost:3010/admin/api/media/resolve?permalink=https%3A%2F%2Fwww.instagram.com%2Fp%2FPOST_CODE%2F" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+`/admin/api/media`는 `IG_BUSINESS_ID`와 `IG_BUSINESS_ACCESS_TOKEN`으로 `graph.instagram.com/{IG_GRAPH_VERSION}/{IG_BUSINESS_ID}/media`를 호출합니다. `limit`은 기본 25이며 최대 100입니다. `/admin/api/media/resolve`는 입력한 Instagram permalink와 내 media 목록의 permalink를 비교해 `media_id`를 찾으며, URL 끝의 slash 유무는 무시합니다.
 
 ## 공개 댓글 답글
 
