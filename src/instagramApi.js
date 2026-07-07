@@ -49,12 +49,14 @@ async function replyToComment(commentId, message) {
   requireValue(message, 'message');
   requireValue(config.igBusinessAccessToken, 'IG_BUSINESS_ACCESS_TOKEN');
 
-  const url = new URL(`https://graph.facebook.com/${config.igGraphVersion}/${commentId}/replies`);
-  url.searchParams.set('access_token', config.igBusinessAccessToken);
+  const url = new URL(`https://graph.instagram.com/${config.igGraphVersion}/${commentId}/replies`);
 
   const data = await fetchJson(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${config.igBusinessAccessToken}`,
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify({ message })
   });
 
