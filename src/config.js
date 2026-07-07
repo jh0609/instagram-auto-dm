@@ -16,7 +16,8 @@ const config = {
   pollingEnabled: String(process.env.POLLING_ENABLED || 'false').toLowerCase() === 'true',
   pollingIntervalSeconds: Number(process.env.POLLING_INTERVAL_SECONDS || 60),
   publicCommentReplyEnabled: String(process.env.PUBLIC_COMMENT_REPLY_ENABLED || 'false').toLowerCase() === 'true',
-  publicCommentReplyText: process.env.PUBLIC_COMMENT_REPLY_TEXT || 'DM으로 보내드렸어요!'
+  publicCommentReplyText: process.env.PUBLIC_COMMENT_REPLY_TEXT || 'DM으로 보내드렸어요!',
+  adminToken: process.env.ADMIN_TOKEN || ''
 };
 
 module.exports = config;

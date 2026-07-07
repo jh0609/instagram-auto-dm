@@ -38,6 +38,7 @@ POLLING_ENABLED=false
 POLLING_INTERVAL_SECONDS=60
 PUBLIC_COMMENT_REPLY_ENABLED=false
 PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
+ADMIN_TOKEN=change-this-admin-token
 ```
 
 토큰 용도:
@@ -46,6 +47,7 @@ PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
 - `IG_BUSINESS_ACCESS_TOKEN`: Instagram Private Reply 발송과 공개 댓글 답글 작성에 사용합니다.
 
 토큰 값은 로그에 출력하지 않습니다.
+`ADMIN_TOKEN`은 `/admin`과 `/admin/api/*` 접근에 사용하는 간단한 관리용 토큰입니다.
 
 ## npm scripts
 
@@ -116,6 +118,57 @@ curl -X POST http://localhost:3010/dev/retry-failed \
 ```
 
 성공하면 기존 로그의 `status`, `recipient_id`, `message_id`, `replied_at`을 업데이트합니다. `PUBLIC_COMMENT_REPLY_ENABLED=true`이면 Private Reply 재발송 성공 후 공개 답글도 시도합니다. 실패하면 `error_message`를 최신 오류로 업데이트합니다.
+
+## Admin UI
+
+`ADMIN_TOKEN`을 설정하면 브라우저에서 rule과 최근 로그를 관리할 수 있습니다.
+
+```text
+https://YOUR-DOMAIN/admin?token=ADMIN_TOKEN
+```
+
+Admin UI 기능:
+
+- `reply_rules` 조회
+- rule 추가/수정
+- rule 비활성화
+- 최근 `reply_logs` 확인
+- 실제 DM 발송 없이 rule matching과 템플릿 렌더링 테스트
+
+Admin API 인증은 아래 두 방식을 모두 지원합니다.
+
+```bash
+curl http://localhost:3010/admin/api/rules?token=ADMIN_TOKEN
+curl http://localhost:3010/admin/api/rules \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+Admin API:
+
+- `GET /admin/api/rules`
+- `POST /admin/api/rules`
+- `PUT /admin/api/rules/:id`
+- `DELETE /admin/api/rules/:id`
+- `GET /admin/api/logs?limit=50`
+- `POST /admin/api/test-match`
+
+`DELETE /admin/api/rules/:id`는 실제 삭제하지 않고 `enabled_yn='N'`으로 비활성화합니다. Rule 생성/수정 시 `keyword`, `reply_text`는 필수이며, `media_id` 빈 문자열은 `NULL`로 저장됩니다. `priority` 기본값은 `100`이고 `enabled_yn`은 `Y` 또는 `N`만 허용합니다.
+
+`POST /admin/api/test-match` 예시:
+
+```bash
+curl -X POST http://localhost:3010/admin/api/test-match \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"media_id\":\"17900000000000000\",
+    \"comment_text\":\"가이드 보내주세요\",
+    \"username\":\"tester\",
+    \"comment_id\":\"comment-1\"
+  }"
+```
+
+응답에는 `matched`, `rule_id`, `keyword`, 렌더링된 `reply_text`, 렌더링된 `public_reply_text`, `resource_url`이 포함됩니다.
 
 ## 공개 댓글 답글
 

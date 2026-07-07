@@ -5,6 +5,7 @@ const { db, initDatabase, insertDefaultRule } = require('./db');
 const { extractComments } = require('./webhookParser');
 const { processComment, retryFailedReplies } = require('./replyService');
 const { pollOnce, startPollingWorker } = require('./pollingWorker');
+const { createAdminRouter } = require('./admin');
 const logger = require('./logger');
 
 initDatabase();
@@ -22,6 +23,8 @@ app.use(express.json({
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
+
+app.use('/admin', createAdminRouter());
 
 app.get('/privacy', (_req, res) => {
   res.type('html').send(`

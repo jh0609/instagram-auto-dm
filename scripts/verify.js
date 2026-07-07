@@ -8,6 +8,8 @@ for (const suffix of ['', '-shm', '-wal']) {
 
 process.env.SQLITE_PATH = './data/verify.sqlite';
 process.env.PUBLIC_COMMENT_REPLY_ENABLED = 'false';
+process.env.ADMIN_TOKEN = 'verify-admin-token';
+process.env.PORT = '0';
 
 const { db, initDatabase } = require('../src/db');
 const { findMatchingRule, renderTemplate } = require('../src/replyService');
@@ -60,15 +62,62 @@ assert(
   'template rendering failed'
 );
 
-db.close();
-for (const suffix of ['', '-shm', '-wal']) {
-  fs.rmSync(`${verifyDbPath}${suffix}`, { force: true });
-}
-
-console.log('verify ok');
+verifyAdminRoutes()
+  .then(() => {
+    db.close();
+    for (const suffix of ['', '-shm', '-wal']) {
+      fs.rmSync(`${verifyDbPath}${suffix}`, { force: true });
+    }
+    console.log('verify ok');
+  })
+  .catch((error) => {
+    db.close();
+    for (const suffix of ['', '-shm', '-wal']) {
+      fs.rmSync(`${verifyDbPath}${suffix}`, { force: true });
+    }
+    throw error;
+  });
 
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
+  }
+}
+
+async function verifyAdminRoutes() {
+  const { server } = require('../src/server');
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const unauthorized = await fetch(`${baseUrl}/admin/api/rules`);
+    assert(unauthorized.status === 401, 'admin API should reject missing token');
+
+    const adminPage = await fetch(`${baseUrl}/admin?token=verify-admin-token`);
+    assert(adminPage.status === 200, 'admin page should load with query token');
+    assert((adminPage.headers.get('content-type') || '').includes('text/html'), 'admin page should return HTML');
+
+    const rules = await fetch(`${baseUrl}/admin/api/rules`, {
+      headers: { Authorization: 'Bearer verify-admin-token' }
+    });
+    assert(rules.status === 200, 'admin rules API should load with bearer token');
+
+    const testMatch = await fetch(`${baseUrl}/admin/api/test-match`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer verify-admin-token',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        media_id: 'media-a',
+        comment_text: 'please send guide',
+        username: 'tester',
+        comment_id: 'comment-1'
+      })
+    });
+    const result = await testMatch.json();
+    assert(testMatch.status === 200 && result.matched === true, 'admin test-match should return rendered match');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 }
