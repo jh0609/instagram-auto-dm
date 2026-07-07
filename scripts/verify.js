@@ -143,6 +143,7 @@ async function verifyAdminRoutes() {
     });
     const logsBody = await logs.json();
     assert(logs.status === 200 && Array.isArray(logsBody.data), 'admin logs API should return data array');
+    assert(logsBody.page === 1 && logsBody.page_size === 20, 'admin logs API should include pagination metadata');
 
     const mediaWithoutConfig = await fetch(`${baseUrl}/admin/api/media`, {
       headers: { Authorization: 'Bearer verify-admin-token' }

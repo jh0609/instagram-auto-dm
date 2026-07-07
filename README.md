@@ -149,7 +149,7 @@ Admin API:
 - `POST /admin/api/rules`
 - `PATCH /admin/api/rules/:id`
 - `DELETE /admin/api/rules/:id`
-- `GET /admin/api/logs`
+- `GET /admin/api/logs?page=1&page_size=20`
 - `GET /admin/api/media?limit=25`
 - `GET /admin/api/media/resolve?permalink=...`
 - `POST /admin/api/test-match`
@@ -182,7 +182,9 @@ curl "http://localhost:3010/admin/api/media/resolve?permalink=https%3A%2F%2Fwww.
   -H "Authorization: Bearer ADMIN_TOKEN"
 ```
 
-`/admin/api/media`는 `IG_BUSINESS_ID`와 `IG_BUSINESS_ACCESS_TOKEN`으로 `graph.instagram.com/{IG_GRAPH_VERSION}/{IG_BUSINESS_ID}/media`를 호출합니다. `limit`은 기본 25이며 최대 100입니다. `/admin/api/media/resolve`는 입력한 Instagram permalink와 내 media 목록의 permalink를 비교해 `media_id`를 찾으며, URL 끝의 slash 유무는 무시합니다.
+`/admin/api/logs`는 `page`, `page_size`, `total`, `total_pages`를 함께 반환합니다. `page_size`는 최대 100입니다.
+
+`/admin/api/media`는 `IG_BUSINESS_ID`와 `IG_BUSINESS_ACCESS_TOKEN`으로 `graph.instagram.com/{IG_GRAPH_VERSION}/{IG_BUSINESS_ID}/media`를 호출합니다. `limit`은 기본 25이며 최대 100입니다. `/admin/api/media/resolve`는 입력한 Instagram permalink와 내 media 목록의 permalink를 비교해 `media_id`를 찾으며, URL 끝의 slash 유무는 무시합니다. `/p/{shortcode}`, `/reel/{shortcode}`, `/tv/{shortcode}` 형식을 지원하고 query string/hash는 제거해 비교합니다.
 
 ## 공개 댓글 답글
 

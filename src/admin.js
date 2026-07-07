@@ -93,7 +93,11 @@ function createAdminRouter() {
   });
 
   router.get('/api/logs', (req, res) => {
-    const limit = clampLimit(req.query.limit, 100, 100);
+    const page = clampPage(req.query.page);
+    const pageSize = clampLimit(req.query.page_size, 20, 100);
+    const total = db.prepare('SELECT COUNT(*) AS count FROM reply_logs').get().count;
+    const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+    const offset = (page - 1) * pageSize;
     const rows = db.prepare(`
       SELECT l.id, l.media_id, l.comment_id, l.username,
              r.keyword AS matched_keyword,
@@ -103,9 +107,15 @@ function createAdminRouter() {
       FROM reply_logs l
       LEFT JOIN reply_rules r ON r.id = l.matched_rule_id
       ORDER BY l.id DESC
-      LIMIT ?
-    `).all(limit);
-    res.json({ data: rows });
+      LIMIT ? OFFSET ?
+    `).all(pageSize, offset);
+    res.json({
+      data: rows,
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: totalPages
+    });
   });
 
   router.get('/api/media', async (req, res) => {
@@ -225,7 +235,17 @@ function normalizeNullableText(value) {
 }
 
 function normalizePermalink(value) {
-  return String(value || '').trim().replace(/\/+$/, '');
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  try {
+    const url = new URL(text);
+    const match = url.pathname.match(/^\/(p|reel|tv)\/([^/]+)\/?/);
+    if (match) return `${url.origin}/${match[1]}/${match[2]}`;
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return text.split(/[?#]/)[0].replace(/\/+$/, '');
+  }
 }
 
 function getRule(id) {
@@ -243,6 +263,12 @@ function clampLimit(value, defaultValue, maxValue) {
   return Math.min(number, maxValue);
 }
 
+function clampPage(value) {
+  const number = Number(value || 1);
+  if (!Number.isInteger(number) || number <= 0) return 1;
+  return number;
+}
+
 function renderAdminPage(token) {
   const safeToken = JSON.stringify(token);
   return `<!doctype html>
@@ -257,6 +283,7 @@ function renderAdminPage(token) {
     h2 { font-size: 18px; margin: 0 0 12px; }
     section { background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
     label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+    .help { margin: 4px 0 0; color: #667085; font-size: 12px; line-height: 1.4; }
     input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #c9ced6; border-radius: 6px; font: inherit; }
     textarea { min-height: 72px; resize: vertical; }
     button { padding: 8px 12px; border: 1px solid #1a73e8; border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
@@ -268,37 +295,67 @@ function renderAdminPage(token) {
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .span { grid-column: 1 / -1; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pager { align-items: center; margin-top: 12px; }
     .muted { color: #667085; }
     .mono { font-family: Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
     @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } body { margin: 12px; } }
   </style>
 </head>
 <body>
-  <h1>autoDM Admin</h1>
+  <h1>autoDM 관리자</h1>
 
   <section>
-    <h2>Reply Rule</h2>
+    <h2>자동응답 규칙 입력</h2>
     <form id="ruleForm" class="grid">
       <input type="hidden" id="ruleId">
-      <div><label>media_id</label><input id="mediaId" placeholder="empty = fallback"></div>
+      <div>
+        <label>게시글 ID</label>
+        <input id="mediaId" placeholder="비워두면 공통 규칙">
+        <p class="help">특정 게시글에만 적용하려면 입력하세요. 비워두면 모든 게시글에 적용됩니다.</p>
+      </div>
       <div>
         <label>게시글 URL로 찾기</label>
         <div class="actions">
           <input id="mediaPermalink" placeholder="https://www.instagram.com/p/...">
           <button type="button" class="secondary" onclick="resolveMedia()">찾기</button>
         </div>
+        <p class="help">Instagram 게시글 URL을 붙여넣으면 게시글 ID를 찾습니다. URL의 query/hash는 자동으로 제거됩니다.</p>
       </div>
-      <div><label>keyword *</label><input id="keyword" required></div>
-      <div class="span"><label>reply_text *</label><textarea id="replyText" required></textarea></div>
-      <div class="span"><label>public_reply_text</label><textarea id="publicReplyText"></textarea></div>
-      <div><label>resource_url</label><input id="resourceUrl"></div>
-      <div><label>priority</label><input id="priority" type="number" value="100"></div>
-      <div><label>enabled_yn</label><select id="enabledYn"><option>Y</option><option>N</option></select></div>
+      <div>
+        <label>댓글 키워드 *</label>
+        <input id="keyword" required>
+        <p class="help">댓글에 이 단어가 포함되면 자동응답을 보냅니다.</p>
+      </div>
+      <div class="span">
+        <label>DM 메시지 *</label>
+        <textarea id="replyText" required></textarea>
+        <p class="help">댓글 작성자에게 DM으로 보낼 내용입니다. {{username}}, {{resource_url}}, {{comment_text}} 사용 가능.</p>
+      </div>
+      <div class="span">
+        <label>공개 댓글 답글</label>
+        <textarea id="publicReplyText"></textarea>
+        <p class="help">댓글 아래에 공개로 남길 답글입니다. 비워두면 공개 답글을 달지 않습니다.</p>
+      </div>
+      <div>
+        <label>자료/링크 URL</label>
+        <input id="resourceUrl">
+        <p class="help">DM 메시지에서 {{resource_url}}로 사용할 링크입니다.</p>
+      </div>
+      <div>
+        <label>우선순위</label>
+        <input id="priority" type="number" value="100">
+        <p class="help">숫자가 낮을수록 먼저 적용됩니다. 게시글별 규칙은 10, 공통 규칙은 100 권장.</p>
+      </div>
+      <div>
+        <label>사용 여부</label>
+        <select id="enabledYn"><option>Y</option><option>N</option></select>
+        <p class="help">N이면 규칙은 저장되지만 자동응답에는 사용하지 않습니다.</p>
+      </div>
       <div class="span actions">
-        <button type="submit">Save</button>
-        <button type="button" class="secondary" onclick="resetRuleForm()">New</button>
-        <button type="button" class="secondary" onclick="loadRules()">Refresh</button>
-        <button type="button" class="secondary" onclick="loadMedia()">게시글 불러오기</button>
+        <button type="submit">저장</button>
+        <button type="button" class="secondary" onclick="resetRuleForm()">새 규칙</button>
+        <button type="button" class="secondary" onclick="loadRules()">새로고침</button>
+        <button type="button" class="secondary" onclick="loadMedia()">최근 게시글 불러오기</button>
       </div>
     </form>
     <div id="mediaStatus" class="muted"></div>
@@ -306,32 +363,58 @@ function renderAdminPage(token) {
   </section>
 
   <section>
-    <h2>Rules</h2>
+    <h2>자동응답 규칙</h2>
     <div id="rules"></div>
   </section>
 
   <section>
-    <h2>Test Match</h2>
+    <h2>매칭 테스트</h2>
     <form id="testForm" class="grid">
-      <div><label>media_id</label><input id="testMediaId"></div>
-      <div><label>username</label><input id="testUsername"></div>
-      <div><label>comment_id</label><input id="testCommentId"></div>
-      <div class="span"><label>comment_text</label><textarea id="testCommentText"></textarea></div>
-      <div class="span"><button type="submit">Test</button></div>
+      <div><label>게시글 ID</label><input id="testMediaId"><p class="help">테스트할 게시글 ID입니다.</p></div>
+      <div><label>사용자명</label><input id="testUsername"><p class="help">{{username}} 치환에 사용됩니다.</p></div>
+      <div><label>댓글 ID</label><input id="testCommentId"><p class="help">{{comment_id}} 치환에 사용됩니다.</p></div>
+      <div class="span"><label>댓글 내용</label><textarea id="testCommentText"></textarea><p class="help">키워드 매칭과 {{comment_text}} 치환에 사용됩니다.</p></div>
+      <div class="span"><button type="submit">테스트</button></div>
     </form>
     <pre id="testResult" class="mono"></pre>
   </section>
 
   <section>
-    <h2>Recent Logs</h2>
-    <div class="actions"><button type="button" class="secondary" onclick="loadLogs()">Refresh Logs</button></div>
+    <h2>발송 기록</h2>
+    <div class="actions"><button type="button" class="secondary" onclick="loadLogs()">새로고침</button></div>
     <div id="logs"></div>
+    <div class="actions pager">
+      <button type="button" class="secondary" onclick="prevLogsPage()">이전</button>
+      <span id="logsPageInfo" class="muted"></span>
+      <button type="button" class="secondary" onclick="nextLogsPage()">다음</button>
+    </div>
   </section>
 
   <script>
     const token = ${safeToken};
     localStorage.setItem('adminToken', token);
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token };
+    const logsState = { page: 1, pageSize: 20, totalPages: 1 };
+    const labels = {
+      id: 'ID',
+      media_id: '게시글 ID',
+      keyword: '댓글 키워드',
+      priority: '우선순위',
+      enabled_yn: '사용 여부',
+      reply_text: 'DM 메시지',
+      public_reply_text: '공개 댓글 답글',
+      resource_url: '자료/링크 URL',
+      caption: '본문',
+      permalink: '게시글 URL',
+      timestamp: '게시일',
+      created_at: '생성일',
+      status: '상태',
+      comment_id: '댓글 ID',
+      username: '사용자명',
+      matched_keyword: '매칭 키워드',
+      rule_id: '규칙 ID',
+      error_message: '오류'
+    };
 
     async function api(path, options = {}) {
       const res = await fetch('/admin/api' + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
@@ -353,12 +436,12 @@ function renderAdminPage(token) {
         const edit = document.createElement('button');
         edit.className = 'secondary';
         edit.type = 'button';
-        edit.textContent = 'Edit';
+        edit.textContent = '수정';
         edit.addEventListener('click', () => editRule(row.id));
         const disable = document.createElement('button');
         disable.className = 'danger';
         disable.type = 'button';
-        disable.textContent = 'Disable';
+        disable.textContent = '비활성화';
         disable.addEventListener('click', () => disableRule(row.id));
         wrap.append(edit, disable);
         return wrap;
@@ -394,7 +477,7 @@ function renderAdminPage(token) {
 
     async function loadMedia() {
       const status = document.getElementById('mediaStatus');
-      status.textContent = 'Loading media...';
+      status.textContent = '최근 게시글을 불러오는 중입니다.';
       try {
         const { data } = await api('/media?limit=25');
         renderTable(document.getElementById('mediaList'), data, [
@@ -403,14 +486,14 @@ function renderAdminPage(token) {
           const button = document.createElement('button');
           button.type = 'button';
           button.className = 'secondary';
-          button.textContent = 'Select';
+          button.textContent = '선택';
           button.addEventListener('click', () => {
             setValue('mediaId', row.id);
-            status.textContent = 'Selected media_id: ' + row.id;
+            status.textContent = '선택한 게시글 ID: ' + row.id;
           });
           return button;
         });
-        status.textContent = data.length ? 'Select a post to fill media_id.' : 'No media found.';
+        status.textContent = data.length ? '게시글을 선택하면 게시글 ID가 자동 입력됩니다.' : '게시글을 찾지 못했습니다.';
       } catch (error) {
         status.textContent = error.message;
       }
@@ -418,16 +501,17 @@ function renderAdminPage(token) {
 
     async function resolveMedia() {
       const status = document.getElementById('mediaStatus');
-      const permalink = value('mediaPermalink');
+      const permalink = normalizePermalink(value('mediaPermalink'));
+      setValue('mediaPermalink', permalink);
       if (!permalink) {
-        status.textContent = 'Enter a permalink.';
+        status.textContent = '게시글 URL을 입력하세요.';
         return;
       }
 
       try {
         const { data } = await api('/media/resolve?permalink=' + encodeURIComponent(permalink));
         setValue('mediaId', data.id);
-        status.textContent = 'Resolved media_id: ' + data.id;
+        status.textContent = '찾은 게시글 ID: ' + data.id;
       } catch (error) {
         status.textContent = error.message;
       }
@@ -450,6 +534,10 @@ function renderAdminPage(token) {
       await loadRules();
     });
 
+    document.getElementById('mediaPermalink').addEventListener('change', event => {
+      event.target.value = normalizePermalink(event.target.value);
+    });
+
     document.getElementById('testForm').addEventListener('submit', async event => {
       event.preventDefault();
       const body = {
@@ -463,10 +551,41 @@ function renderAdminPage(token) {
     });
 
     async function loadLogs() {
-      const { data } = await api('/logs');
+      const result = await api('/logs?page=' + logsState.page + '&page_size=' + logsState.pageSize);
+      const data = result.data;
+      logsState.page = result.page;
+      logsState.pageSize = result.page_size;
+      logsState.totalPages = result.total_pages;
       renderTable(document.getElementById('logs'), data, [
         'id', 'created_at', 'status', 'media_id', 'comment_id', 'username', 'matched_keyword', 'rule_id', 'reply_text', 'public_reply_text', 'error_message'
       ]);
+      document.getElementById('logsPageInfo').textContent =
+        logsState.page + ' / ' + logsState.totalPages + ' 페이지, 총 ' + result.total + '건';
+    }
+
+    async function prevLogsPage() {
+      if (logsState.page <= 1) return;
+      logsState.page -= 1;
+      await loadLogs();
+    }
+
+    async function nextLogsPage() {
+      if (logsState.page >= logsState.totalPages) return;
+      logsState.page += 1;
+      await loadLogs();
+    }
+
+    function normalizePermalink(input) {
+      const text = String(input || '').trim();
+      if (!text) return '';
+      try {
+        const url = new URL(text);
+        const match = url.pathname.match(/^\\/(p|reel|tv)\\/([^/]+)\\/?/);
+        if (match) return url.origin + '/' + match[1] + '/' + match[2] + '/';
+        return url.origin + url.pathname.replace(/\\/+$/, '') + '/';
+      } catch {
+        return text.split(/[?#]/)[0].replace(/\\/+$/, '') + '/';
+      }
     }
 
     function renderTable(target, rows, columns, actionRenderer) {
@@ -484,12 +603,12 @@ function renderAdminPage(token) {
       const headRow = document.createElement('tr');
       for (const column of columns) {
         const th = document.createElement('th');
-        th.textContent = column;
+        th.textContent = labels[column] || column;
         headRow.append(th);
       }
       if (actionRenderer) {
         const th = document.createElement('th');
-        th.textContent = 'actions';
+        th.textContent = '작업';
         headRow.append(th);
       }
       thead.append(headRow);
