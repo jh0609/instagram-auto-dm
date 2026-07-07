@@ -36,11 +36,13 @@ DEFAULT_REPLY_TEXT=자동 답장 메시지
 SQLITE_PATH=./data/instagram_auto_dm.sqlite
 POLLING_ENABLED=false
 POLLING_INTERVAL_SECONDS=60
+PUBLIC_COMMENT_REPLY_ENABLED=false
+PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
 ```
 
 토큰 용도:
 
-- `FB_PAGE_ACCESS_TOKEN`: 댓글 조회, polling, fallback 조회에 사용합니다.
+- `FB_PAGE_ACCESS_TOKEN`: 댓글 조회, polling, fallback 조회, 공개 댓글 답글 작성에 사용합니다.
 - `IG_BUSINESS_ACCESS_TOKEN`: Instagram Private Reply 발송에 사용합니다.
 
 토큰 값은 로그에 출력하지 않습니다.
@@ -101,6 +103,31 @@ curl -X POST http://localhost:3010/dev/poll-once \
 
 `media_id`를 생략하면 `DEFAULT_MEDIA_ID`를 사용합니다.
 
+### POST /dev/retry-failed
+
+`reply_logs`에서 `status='failed'`인 최근 로그를 다시 발송합니다. 기본 `limit`은 10입니다.
+
+```bash
+curl -X POST http://localhost:3010/dev/retry-failed \
+  -H "Content-Type: application/json" \
+  -d "{\"limit\":10}"
+```
+
+성공하면 기존 로그의 `status`, `recipient_id`, `message_id`, `replied_at`을 업데이트합니다. `PUBLIC_COMMENT_REPLY_ENABLED=true`이면 Private Reply 재발송 성공 후 공개 답글도 시도합니다. 실패하면 `error_message`를 최신 오류로 업데이트합니다.
+
+## 공개 댓글 답글
+
+`PUBLIC_COMMENT_REPLY_ENABLED=true`로 설정하면 Private Reply 발송이 성공한 댓글에 공개 답글을 추가로 작성합니다. 기본 문구는 `PUBLIC_COMMENT_REPLY_TEXT`의 값이며 예시는 다음과 같습니다.
+
+```env
+PUBLIC_COMMENT_REPLY_ENABLED=true
+PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
+```
+
+공개 답글은 Private Reply가 성공한 뒤에만 작성됩니다. 공개 답글 작성에 실패해도 DM 발송 성공은 유지되며, `reply_logs.status`는 `sent`로 남고 공개 답글 결과는 `public_reply_status`, `public_reply_error_message` 컬럼에 별도로 저장됩니다.
+
+이미 `public_reply_status='sent'`인 댓글은 `/dev/retry-failed` 등에서 다시 처리되더라도 공개 답글을 중복 작성하지 않습니다.
+
 ## Webhook 등록
 
 1. Meta App Dashboard에서 Webhooks 제품을 설정합니다.
@@ -142,6 +169,22 @@ curl -X POST http://localhost:3010/dev/poll-once \
 ```env
 POLLING_ENABLED=true
 POLLING_INTERVAL_SECONDS=60
+```
+
+## 일시 오류 재처리
+
+Meta Graph API가 Private Reply 발송 중 HTTP 500 또는 `OAuthException code=1` 같은 `unknown error`를 반환하는 경우가 있습니다. 이는 Meta 측 일시 오류일 수 있으므로 서버는 Private Reply 발송 시 다음 오류를 최대 2회 자동 재시도합니다.
+
+- HTTP 500 이상
+- Graph API `error.code` 1 또는 2
+- 네트워크 `ECONNRESET`, `ETIMEDOUT`, timeout 계열 오류
+
+자동 재시도 후에도 실패한 로그는 `reply_logs.status='failed'`로 남습니다. 이후 아래 endpoint로 수동 재처리할 수 있습니다.
+
+```bash
+curl -X POST http://localhost:3010/dev/retry-failed \
+  -H "Content-Type: application/json" \
+  -d "{\"limit\":10}"
 ```
 
 ## DB 초기화

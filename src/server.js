@@ -3,7 +3,7 @@ const express = require('express');
 const config = require('./config');
 const { db, initDatabase, insertDefaultRule } = require('./db');
 const { extractComments } = require('./webhookParser');
-const { processComment } = require('./replyService');
+const { processComment, retryFailedReplies } = require('./replyService');
 const { pollOnce, startPollingWorker } = require('./pollingWorker');
 const logger = require('./logger');
 
@@ -47,6 +47,17 @@ app.post('/dev/poll-once', async (req, res) => {
     res.json(result);
   } catch (error) {
     logger.error('Manual polling failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/dev/retry-failed', async (req, res) => {
+  const limit = req.body && req.body.limit;
+  try {
+    const result = await retryFailedReplies(limit);
+    res.json(result);
+  } catch (error) {
+    logger.error('Failed reply retry endpoint failed', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

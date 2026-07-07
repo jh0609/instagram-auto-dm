@@ -1,5 +1,6 @@
 const { db } = require('./db');
-const { sendPrivateReply, formatApiError } = require('./instagramApi');
+const config = require('./config');
+const { sendPrivateReply, replyToComment, formatApiError } = require('./instagramApi');
 const logger = require('./logger');
 
 function stringifyPayload(rawPayload) {
@@ -26,18 +27,84 @@ function findMatchingRule(mediaId, text) {
 }
 
 function insertLog(input) {
+  const row = {
+    publicReplyText: null,
+    publicReplyCommentId: null,
+    publicReplyStatus: null,
+    publicReplyErrorMessage: null,
+    publicRepliedAt: null,
+    ...input
+  };
+
   db.prepare(`
     INSERT INTO reply_logs (
       media_id, comment_id, username, comment_text, matched_rule_id,
       reply_text, recipient_id, message_id, status, error_message,
-      raw_payload, replied_at
+      raw_payload, replied_at, public_reply_text, public_reply_comment_id,
+      public_reply_status, public_reply_error_message, public_replied_at
     )
     VALUES (
       @mediaId, @commentId, @username, @commentText, @matchedRuleId,
       @replyText, @recipientId, @messageId, @status, @errorMessage,
-      @rawPayload, @repliedAt
+      @rawPayload, @repliedAt, @publicReplyText, @publicReplyCommentId,
+      @publicReplyStatus, @publicReplyErrorMessage, @publicRepliedAt
     )
-  `).run(input);
+  `).run(row);
+}
+
+async function createPublicCommentReply({ logId = null, mediaId = null, commentId, existingPublicReplyStatus = null }) {
+  if (!config.publicCommentReplyEnabled) {
+    return {
+      publicReplyText: null,
+      publicReplyCommentId: null,
+      publicReplyStatus: null,
+      publicReplyErrorMessage: null,
+      publicRepliedAt: null
+    };
+  }
+
+  if (existingPublicReplyStatus === 'sent') {
+    return {
+      publicReplyText: config.publicCommentReplyText,
+      publicReplyCommentId: null,
+      publicReplyStatus: 'sent',
+      publicReplyErrorMessage: null,
+      publicRepliedAt: null
+    };
+  }
+
+  try {
+    const result = await replyToComment(commentId, config.publicCommentReplyText);
+    const publicRepliedAt = new Date().toISOString();
+    logger.info('Public comment reply sent', {
+      logId,
+      mediaId,
+      commentId,
+      publicReplyCommentId: result.comment_id
+    });
+    return {
+      publicReplyText: config.publicCommentReplyText,
+      publicReplyCommentId: result.comment_id,
+      publicReplyStatus: 'sent',
+      publicReplyErrorMessage: null,
+      publicRepliedAt
+    };
+  } catch (error) {
+    const errorMessage = formatApiError(error);
+    logger.error('Public comment reply failed', {
+      logId,
+      mediaId,
+      commentId,
+      error: errorMessage
+    });
+    return {
+      publicReplyText: config.publicCommentReplyText,
+      publicReplyCommentId: null,
+      publicReplyStatus: 'failed',
+      publicReplyErrorMessage: errorMessage,
+      publicRepliedAt: null
+    };
+  }
 }
 
 async function processComment({ mediaId, commentId, username = null, text = null, rawPayload = null }) {
@@ -76,6 +143,7 @@ async function processComment({ mediaId, commentId, username = null, text = null
 
     try {
       const result = await sendPrivateReply(commentId, matchedRule.reply_text);
+      const publicReply = await createPublicCommentReply({ mediaId, commentId });
       insertLog({
         mediaId,
         commentId,
@@ -88,7 +156,8 @@ async function processComment({ mediaId, commentId, username = null, text = null
         status: 'sent',
         errorMessage: null,
         rawPayload: payloadText,
-        repliedAt: new Date().toISOString()
+        repliedAt: new Date().toISOString(),
+        ...publicReply
       });
       logger.info('Private reply sent', { mediaId, commentId, ruleId: matchedRule.id });
       return { status: 'sent', commentId, ruleId: matchedRule.id };
@@ -140,6 +209,103 @@ async function processComment({ mediaId, commentId, username = null, text = null
   }
 }
 
+async function retryFailedReplies(limit = 10) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+  const rows = db.prepare(`
+    SELECT id, media_id, comment_id, reply_text, error_message, created_at, public_reply_status
+    FROM reply_logs
+    WHERE status = 'failed'
+      AND comment_id IS NOT NULL
+      AND reply_text IS NOT NULL
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(safeLimit);
+
+  const results = [];
+
+  for (const row of rows) {
+    try {
+      const result = await sendPrivateReply(row.comment_id, row.reply_text);
+      const repliedAt = new Date().toISOString();
+      const publicReply = await createPublicCommentReply({
+        logId: row.id,
+        mediaId: row.media_id,
+        commentId: row.comment_id,
+        existingPublicReplyStatus: row.public_reply_status
+      });
+      db.prepare(`
+        UPDATE reply_logs
+        SET status = 'sent',
+            recipient_id = ?,
+            message_id = ?,
+            error_message = NULL,
+            replied_at = ?,
+            public_reply_text = COALESCE(?, public_reply_text),
+            public_reply_comment_id = COALESCE(?, public_reply_comment_id),
+            public_reply_status = COALESCE(?, public_reply_status),
+            public_reply_error_message = ?,
+            public_replied_at = COALESCE(?, public_replied_at)
+        WHERE id = ?
+      `).run(
+        result.recipient_id,
+        result.message_id,
+        repliedAt,
+        publicReply.publicReplyText,
+        publicReply.publicReplyCommentId,
+        publicReply.publicReplyStatus,
+        publicReply.publicReplyErrorMessage,
+        publicReply.publicRepliedAt,
+        row.id
+      );
+
+      logger.info('Failed private reply retry succeeded', {
+        logId: row.id,
+        mediaId: row.media_id,
+        commentId: row.comment_id
+      });
+      results.push({
+        logId: row.id,
+        commentId: row.comment_id,
+        status: 'sent',
+        recipientId: result.recipient_id,
+        messageId: result.message_id,
+        publicReplyStatus: publicReply.publicReplyStatus,
+        publicReplyCommentId: publicReply.publicReplyCommentId,
+        publicReplyErrorMessage: publicReply.publicReplyErrorMessage
+      });
+    } catch (error) {
+      const errorMessage = formatApiError(error);
+      db.prepare(`
+        UPDATE reply_logs
+        SET error_message = ?
+        WHERE id = ?
+      `).run(errorMessage, row.id);
+
+      logger.error('Failed private reply retry failed', {
+        logId: row.id,
+        mediaId: row.media_id,
+        commentId: row.comment_id,
+        error: errorMessage
+      });
+      results.push({
+        logId: row.id,
+        commentId: row.comment_id,
+        status: 'failed',
+        errorMessage
+      });
+    }
+  }
+
+  return {
+    requestedLimit: safeLimit,
+    total: rows.length,
+    sent: results.filter((result) => result.status === 'sent').length,
+    failed: results.filter((result) => result.status === 'failed').length,
+    results
+  };
+}
+
 module.exports = {
-  processComment
+  processComment,
+  retryFailedReplies
 };

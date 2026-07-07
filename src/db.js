@@ -35,7 +35,12 @@ function initDatabase() {
       error_message TEXT NULL,
       raw_payload TEXT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      replied_at TEXT NULL
+      replied_at TEXT NULL,
+      public_reply_text TEXT NULL,
+      public_reply_comment_id TEXT NULL,
+      public_reply_status TEXT NULL,
+      public_reply_error_message TEXT NULL,
+      public_replied_at TEXT NULL
     );
 
     CREATE TABLE IF NOT EXISTS webhook_events (
@@ -48,6 +53,20 @@ function initDatabase() {
       processed_at TEXT NULL
     );
   `);
+
+  addColumnIfMissing('reply_logs', 'public_reply_text', 'TEXT');
+  addColumnIfMissing('reply_logs', 'public_reply_comment_id', 'TEXT');
+  addColumnIfMissing('reply_logs', 'public_reply_status', 'TEXT');
+  addColumnIfMissing('reply_logs', 'public_reply_error_message', 'TEXT');
+  addColumnIfMissing('reply_logs', 'public_replied_at', 'TEXT');
+}
+
+function addColumnIfMissing(tableName, columnName, columnType) {
+  const columns = db.pragma(`table_info(${tableName})`);
+  const exists = columns.some((column) => column.name === columnName);
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`);
+  }
 }
 
 function insertDefaultRule() {
