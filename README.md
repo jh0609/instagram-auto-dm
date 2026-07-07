@@ -54,9 +54,11 @@ npm run init-db
 npm run dev
 npm start
 npm run poll-once -- <media_id>
+npm run verify
 ```
 
 `npm run poll-once`에서 `<media_id>`를 생략하면 `DEFAULT_MEDIA_ID`를 사용합니다.
+`npm run verify`는 임시 SQLite DB로 rule 마이그레이션, media별/fallback 매칭, 템플릿 치환을 확인합니다.
 
 ## Endpoints
 
@@ -127,6 +129,55 @@ PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
 공개 답글은 Private Reply가 성공한 뒤에만 작성됩니다. 공개 답글 작성에 실패해도 DM 발송 성공은 유지되며, `reply_logs.status`는 `sent`로 남고 공개 답글 결과는 `public_reply_status`, `public_reply_error_message` 컬럼에 별도로 저장됩니다.
 
 이미 `public_reply_status='sent'`인 댓글은 `/dev/retry-failed` 등에서 다시 처리되더라도 공개 답글을 중복 작성하지 않습니다.
+
+## 게시글별 Reply Rule
+
+`reply_rules.media_id`에 Instagram media id를 넣으면 해당 게시글 댓글에만 적용되는 rule이 됩니다. `media_id`가 `NULL`인 rule은 모든 게시글에 적용되는 fallback rule입니다.
+
+매칭 우선순위:
+
+1. `enabled_yn='Y'`
+2. 댓글 내용에 `keyword` 포함
+3. 현재 댓글의 `media_id`와 일치하는 rule 우선
+4. `media_id IS NULL`인 공통 rule은 fallback
+5. 같은 범위에서는 `priority ASC`, 그 다음 `id ASC`
+
+예시:
+
+```sql
+INSERT INTO reply_rules (
+  media_id, keyword, reply_text, public_reply_text, resource_url, priority, enabled_yn
+) VALUES (
+  '17900000000000000',
+  '가이드',
+  '{{username}}님, 요청하신 자료입니다: {{resource_url}}',
+  'DM으로 {{keyword}} 자료를 보내드렸어요!',
+  'https://example.com/guide-a',
+  10,
+  'Y'
+);
+
+INSERT INTO reply_rules (
+  media_id, keyword, reply_text, public_reply_text, resource_url, priority, enabled_yn
+) VALUES (
+  NULL,
+  '가이드',
+  '요청하신 공통 자료입니다: {{resource_url}}',
+  'DM으로 보내드렸어요!',
+  'https://example.com/default-guide',
+  100,
+  'Y'
+);
+```
+
+`reply_text`와 `public_reply_text`는 아래 템플릿 변수를 지원합니다.
+
+- `{{username}}`
+- `{{keyword}}`
+- `{{comment_text}}`
+- `{{media_id}}`
+- `{{comment_id}}`
+- `{{resource_url}}`
 
 ## Webhook 등록
 
@@ -202,6 +253,14 @@ npm run init-db
 - `webhook_events`
 
 `DEFAULT_KEYWORD`와 `DEFAULT_REPLY_TEXT`가 설정되어 있으면 `reply_rules`에 기본 룰을 1개 생성합니다. 동일한 keyword/reply_text 조합의 기본 룰이 이미 있으면 중복 생성하지 않습니다.
+
+기존 DB에도 안전하게 동작하며, `reply_rules`에 아래 컬럼이 없으면 자동으로 추가합니다.
+
+- `media_id`
+- `priority`
+- `enabled_yn`
+- `public_reply_text`
+- `resource_url`
 
 ## 중복 발송 방지
 

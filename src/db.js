@@ -17,6 +17,10 @@ function initDatabase() {
       keyword TEXT NOT NULL,
       reply_text TEXT NOT NULL,
       use_yn TEXT NOT NULL DEFAULT 'Y',
+      priority INTEGER NOT NULL DEFAULT 100,
+      enabled_yn TEXT NOT NULL DEFAULT 'Y',
+      public_reply_text TEXT NULL,
+      resource_url TEXT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NULL
     );
@@ -54,6 +58,19 @@ function initDatabase() {
     );
   `);
 
+  addColumnIfMissing('reply_rules', 'media_id', 'TEXT');
+  addColumnIfMissing('reply_rules', 'priority', 'INTEGER NOT NULL DEFAULT 100');
+  const addedEnabledYn = addColumnIfMissing('reply_rules', 'enabled_yn', "TEXT NOT NULL DEFAULT 'Y'");
+  addColumnIfMissing('reply_rules', 'public_reply_text', 'TEXT');
+  addColumnIfMissing('reply_rules', 'resource_url', 'TEXT');
+  if (addedEnabledYn) {
+    db.exec(`
+      UPDATE reply_rules
+      SET enabled_yn = use_yn
+      WHERE use_yn IN ('Y', 'N')
+    `);
+  }
+
   addColumnIfMissing('reply_logs', 'public_reply_text', 'TEXT');
   addColumnIfMissing('reply_logs', 'public_reply_comment_id', 'TEXT');
   addColumnIfMissing('reply_logs', 'public_reply_status', 'TEXT');
@@ -66,7 +83,9 @@ function addColumnIfMissing(tableName, columnName, columnType) {
   const exists = columns.some((column) => column.name === columnName);
   if (!exists) {
     db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`);
+    return true;
   }
+  return false;
 }
 
 function insertDefaultRule() {
@@ -82,8 +101,8 @@ function insertDefaultRule() {
   if (existing) return existing.id;
 
   const result = db.prepare(`
-    INSERT INTO reply_rules (media_id, keyword, reply_text, use_yn)
-    VALUES (NULL, ?, ?, 'Y')
+    INSERT INTO reply_rules (media_id, keyword, reply_text, use_yn, enabled_yn, priority)
+    VALUES (NULL, ?, ?, 'Y', 'Y', 100)
   `).run(config.defaultKeyword, config.defaultReplyText);
 
   return result.lastInsertRowid;

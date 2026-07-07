@@ -16,14 +16,25 @@ function stringifyPayload(rawPayload) {
 function findMatchingRule(mediaId, text) {
   const normalizedText = String(text || '').toLowerCase();
   const rules = db.prepare(`
-    SELECT id, media_id, keyword, reply_text
+    SELECT id, media_id, keyword, reply_text, public_reply_text, resource_url, priority
     FROM reply_rules
-    WHERE use_yn = 'Y'
+    WHERE enabled_yn = 'Y'
       AND (media_id = ? OR media_id IS NULL)
-    ORDER BY CASE WHEN media_id = ? THEN 0 ELSE 1 END, id ASC
+    ORDER BY
+      CASE WHEN media_id = ? THEN 0 ELSE 1 END,
+      priority ASC,
+      id ASC
   `).all(mediaId, mediaId);
 
   return rules.find((rule) => normalizedText.includes(String(rule.keyword).toLowerCase())) || null;
+}
+
+function renderTemplate(template, context) {
+  if (template == null) return null;
+  return String(template).replace(/\{\{\s*(username|keyword|comment_text|media_id|comment_id|resource_url)\s*\}\}/g, (_match, key) => {
+    const value = context[key];
+    return value == null ? '' : String(value);
+  });
 }
 
 function insertLog(input) {
@@ -52,7 +63,13 @@ function insertLog(input) {
   `).run(row);
 }
 
-async function createPublicCommentReply({ logId = null, mediaId = null, commentId, existingPublicReplyStatus = null }) {
+async function createPublicCommentReply({
+  logId = null,
+  mediaId = null,
+  commentId,
+  message,
+  existingPublicReplyStatus = null
+}) {
   if (!config.publicCommentReplyEnabled) {
     return {
       publicReplyText: null,
@@ -65,7 +82,7 @@ async function createPublicCommentReply({ logId = null, mediaId = null, commentI
 
   if (existingPublicReplyStatus === 'sent') {
     return {
-      publicReplyText: config.publicCommentReplyText,
+      publicReplyText: message,
       publicReplyCommentId: null,
       publicReplyStatus: 'sent',
       publicReplyErrorMessage: null,
@@ -74,7 +91,7 @@ async function createPublicCommentReply({ logId = null, mediaId = null, commentI
   }
 
   try {
-    const result = await replyToComment(commentId, config.publicCommentReplyText);
+    const result = await replyToComment(commentId, message);
     const publicRepliedAt = new Date().toISOString();
     logger.info('Public comment reply sent', {
       logId,
@@ -83,7 +100,7 @@ async function createPublicCommentReply({ logId = null, mediaId = null, commentI
       publicReplyCommentId: result.comment_id
     });
     return {
-      publicReplyText: config.publicCommentReplyText,
+      publicReplyText: message,
       publicReplyCommentId: result.comment_id,
       publicReplyStatus: 'sent',
       publicReplyErrorMessage: null,
@@ -98,7 +115,7 @@ async function createPublicCommentReply({ logId = null, mediaId = null, commentI
       error: errorMessage
     });
     return {
-      publicReplyText: config.publicCommentReplyText,
+      publicReplyText: message,
       publicReplyCommentId: null,
       publicReplyStatus: 'failed',
       publicReplyErrorMessage: errorMessage,
@@ -141,16 +158,34 @@ async function processComment({ mediaId, commentId, username = null, text = null
       return { status: 'ignored', commentId };
     }
 
+    const templateContext = {
+      username,
+      keyword: matchedRule.keyword,
+      comment_text: text,
+      media_id: mediaId,
+      comment_id: commentId,
+      resource_url: matchedRule.resource_url
+    };
+    const replyText = renderTemplate(matchedRule.reply_text, templateContext);
+    const publicReplyText = renderTemplate(
+      matchedRule.public_reply_text || config.publicCommentReplyText,
+      templateContext
+    );
+
     try {
-      const result = await sendPrivateReply(commentId, matchedRule.reply_text);
-      const publicReply = await createPublicCommentReply({ mediaId, commentId });
+      const result = await sendPrivateReply(commentId, replyText);
+      const publicReply = await createPublicCommentReply({
+        mediaId,
+        commentId,
+        message: publicReplyText
+      });
       insertLog({
         mediaId,
         commentId,
         username,
         commentText: text,
         matchedRuleId: matchedRule.id,
-        replyText: matchedRule.reply_text,
+        replyText,
         recipientId: result.recipient_id,
         messageId: result.message_id,
         status: 'sent',
@@ -169,13 +204,14 @@ async function processComment({ mediaId, commentId, username = null, text = null
         username,
         commentText: text,
         matchedRuleId: matchedRule.id,
-        replyText: matchedRule.reply_text,
+        replyText,
         recipientId: null,
         messageId: null,
         status: 'failed',
         errorMessage,
         rawPayload: payloadText,
-        repliedAt: null
+        repliedAt: null,
+        publicReplyText
       });
       logger.error('Private reply failed', { mediaId, commentId, ruleId: matchedRule.id, error: errorMessage });
       return { status: 'failed', commentId, ruleId: matchedRule.id, errorMessage };
@@ -212,7 +248,7 @@ async function processComment({ mediaId, commentId, username = null, text = null
 async function retryFailedReplies(limit = 10) {
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
   const rows = db.prepare(`
-    SELECT id, media_id, comment_id, reply_text, error_message, created_at, public_reply_status
+    SELECT id, media_id, comment_id, reply_text, error_message, created_at, public_reply_text, public_reply_status
     FROM reply_logs
     WHERE status = 'failed'
       AND comment_id IS NOT NULL
@@ -231,7 +267,8 @@ async function retryFailedReplies(limit = 10) {
         logId: row.id,
         mediaId: row.media_id,
         commentId: row.comment_id,
-        existingPublicReplyStatus: row.public_reply_status
+        existingPublicReplyStatus: row.public_reply_status,
+        message: row.public_reply_text || config.publicCommentReplyText
       });
       db.prepare(`
         UPDATE reply_logs
@@ -307,5 +344,7 @@ async function retryFailedReplies(limit = 10) {
 
 module.exports = {
   processComment,
-  retryFailedReplies
+  retryFailedReplies,
+  findMatchingRule,
+  renderTemplate
 };
