@@ -157,6 +157,7 @@ Admin API:
 - `GET /admin/api/logs?page=1&page_size=20`
 - `GET /admin/api/media?limit=25`
 - `GET /admin/api/media/resolve?permalink=...`
+- `POST /admin/api/assets/upload`
 - `POST /admin/api/test-match`
 
 `DELETE /admin/api/rules/:id`는 실제 삭제하지 않고 `enabled_yn='N'`으로 비활성화합니다. Rule 생성/수정 시 `keyword`, `reply_text`는 필수이며, `media_id` 빈 문자열은 `NULL`로 저장됩니다. `priority` 기본값은 `100`이고 `enabled_yn`은 `Y` 또는 `N`만 허용합니다.
@@ -192,6 +193,34 @@ curl "http://localhost:3010/admin/api/media/resolve?permalink=https%3A%2F%2Fwww.
 `/admin/api/media`는 `IG_BUSINESS_ID`와 `IG_BUSINESS_ACCESS_TOKEN`으로 `graph.instagram.com/{IG_GRAPH_VERSION}/{IG_BUSINESS_ID}/media`를 호출합니다. `limit`은 기본 25이며 최대 100입니다. media 목록은 rate limit 방지를 위해 기본 5분간 메모리에 캐시됩니다. 강제로 새로 조회하려면 `?force=true`를 붙입니다.
 
 `/admin/api/media/resolve`는 캐시된 media 목록을 우선 사용하며, 입력한 Instagram permalink와 내 media 목록의 permalink를 비교해 `media_id`를 찾습니다. URL 끝의 slash 유무는 무시합니다. `/p/{shortcode}`, `/reel/{shortcode}`, `/tv/{shortcode}` 형식을 지원하고 query string/hash는 제거해 비교합니다. resolve도 `?force=true`를 붙이면 캐시를 무시하고 새로 조회합니다.
+
+## 이미지 업로드
+
+Admin UI의 `이미지 업로드` 섹션에서 이미지를 업로드하면 `public/assets/`에 저장되고 공개 URL을 반환합니다. 업로드 완료 후 `자료/링크 URL에 넣기` 버튼을 누르면 rule form의 `자료/링크 URL`에 자동 입력됩니다. 이 URL은 `reply_text`에서 `{{resource_url}}`로 사용할 수 있습니다.
+
+업로드 API:
+
+```bash
+curl -X POST "http://localhost:3010/admin/api/assets/upload" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -F "image=@./example.png"
+```
+
+제한:
+
+- field 이름: `image`
+- 허용 MIME: `image/png`, `image/jpeg`, `image/webp`
+- 허용 확장자: `.png`, `.jpg`, `.jpeg`, `.webp`
+- 최대 파일 크기: 5MB
+- 파일명은 서버에서 `aji-YYYYMMDD-HHMMSS-random.ext` 형식으로 재생성합니다.
+
+Nginx에서 아래처럼 정적 서빙하도록 설정하면 업로드된 파일이 공개 URL로 접근됩니다.
+
+```nginx
+location /assets/ {
+    alias /opt/instagram-auto-dm/public/assets/;
+}
+```
 
 ## Rate Limit 대응
 

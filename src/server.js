@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
+const path = require('path');
 const config = require('./config');
 const { db, initDatabase, insertDefaultRule } = require('./db');
 const { extractComments } = require('./webhookParser');
@@ -24,6 +25,7 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.use('/assets', express.static(path.resolve(process.cwd(), 'public', 'assets')));
 app.use('/admin', createAdminRouter());
 
 app.get('/privacy', (_req, res) => {

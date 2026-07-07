@@ -201,6 +201,16 @@ async function verifyAdminRoutes() {
       'admin media API should return clear config error when Instagram credentials are missing'
     );
 
+    const uploadWithoutFile = await fetch(`${baseUrl}/admin/api/assets/upload`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer verify-admin-token' }
+    });
+    const uploadWithoutFileBody = await uploadWithoutFile.json();
+    assert(
+      uploadWithoutFile.status === 400 && /이미지/.test(uploadWithoutFileBody.error),
+      'admin asset upload API should load and reject missing image'
+    );
+
     const testMatch = await fetch(`${baseUrl}/admin/api/test-match`, {
       method: 'POST',
       headers: {

@@ -1,4 +1,8 @@
+const crypto = require('crypto');
 const express = require('express');
+const fs = require('fs');
+const multer = require('multer');
+const path = require('path');
 const config = require('./config');
 const { db } = require('./db');
 const { fetchMedia } = require('./instagramApi');
@@ -6,6 +10,32 @@ const { createMediaCache } = require('./mediaCache');
 const { findMatchingRule, renderTemplate } = require('./replyService');
 
 const mediaCache = createMediaCache(fetchMedia, config.mediaCacheTtlSeconds);
+const assetsDir = path.resolve(process.cwd(), 'public', 'assets');
+const allowedImageTypes = new Map([
+  ['image/png', new Set(['.png'])],
+  ['image/jpeg', new Set(['.jpg', '.jpeg'])],
+  ['image/webp', new Set(['.webp'])]
+]);
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      fs.mkdirSync(assetsDir, { recursive: true });
+      cb(null, assetsDir);
+    },
+    filename: (_req, file, cb) => {
+      cb(null, createAssetFilename(file));
+    }
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const extension = path.extname(file.originalname || '').toLowerCase();
+    const allowedExtensions = allowedImageTypes.get(file.mimetype);
+    if (!allowedExtensions || !allowedExtensions.has(extension)) {
+      return cb(new Error('png, jpg, jpeg, webp 이미지만 업로드할 수 있습니다.'));
+    }
+    return cb(null, true);
+  }
+});
 
 function createAdminRouter() {
   const router = express.Router();
@@ -151,6 +181,27 @@ function createAdminRouter() {
     }
   });
 
+  router.post('/api/assets/upload', (req, res) => {
+    upload.single('image')(req, res, (error) => {
+      if (error) {
+        const message = error.code === 'LIMIT_FILE_SIZE'
+          ? '이미지는 최대 5MB까지 업로드할 수 있습니다.'
+          : error.message || '이미지 업로드에 실패했습니다.';
+        return res.status(400).json({ error: message });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: '업로드할 이미지 파일을 선택하세요.' });
+      }
+
+      return res.json({
+        ok: true,
+        filename: req.file.filename,
+        url: `${getPublicBaseUrl(req)}/assets/${req.file.filename}`
+      });
+    });
+  });
+
   router.post('/api/test-match', (req, res) => {
     const mediaId = normalizeNullableText(req.body && req.body.media_id);
     const commentText = normalizeNullableText(req.body && req.body.comment_text) || '';
@@ -283,6 +334,32 @@ function isForceRefresh(query) {
   return value === '1' || value === 'true' || value === 'y' || value === 'yes';
 }
 
+function createAssetFilename(file) {
+  const extension = path.extname(file.originalname || '').toLowerCase();
+  const timestamp = formatAssetTimestamp(new Date());
+  const random = crypto.randomBytes(3).toString('hex');
+  return `aji-${timestamp}-${random}${extension}`;
+}
+
+function formatAssetTimestamp(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join('') + '-' + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join('');
+}
+
+function getPublicBaseUrl(req) {
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  const host = String(req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  return `${proto}://${host}`;
+}
+
 function renderAdminPage(token) {
   const safeToken = JSON.stringify(token);
   return `<!doctype html>
@@ -379,6 +456,26 @@ function renderAdminPage(token) {
   <section>
     <h2>자동응답 규칙</h2>
     <div id="rules"></div>
+  </section>
+
+  <section>
+    <h2>이미지 업로드</h2>
+    <div class="grid">
+      <div>
+        <label>이미지 파일</label>
+        <input id="assetImage" type="file" accept="image/png,image/jpeg,image/webp">
+        <p class="help">png, jpg, jpeg, webp 파일만 업로드할 수 있습니다. 최대 5MB.</p>
+      </div>
+      <div class="actions">
+        <button type="button" onclick="uploadAsset()">업로드</button>
+        <button type="button" class="secondary" onclick="useUploadedAssetUrl()">자료/링크 URL에 넣기</button>
+      </div>
+      <div class="span">
+        <label>업로드 URL</label>
+        <input id="uploadedAssetUrl" readonly>
+        <p id="assetUploadStatus" class="help"></p>
+      </div>
+    </div>
   </section>
 
   <section>
@@ -530,6 +627,45 @@ function renderAdminPage(token) {
       } catch (error) {
         status.textContent = error.message;
       }
+    }
+
+    async function uploadAsset() {
+      const status = document.getElementById('assetUploadStatus');
+      const input = document.getElementById('assetImage');
+      const file = input.files && input.files[0];
+      if (!file) {
+        status.textContent = '업로드할 이미지 파일을 선택하세요.';
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('image', file);
+      status.textContent = '이미지를 업로드하는 중입니다.';
+
+      try {
+        const res = await fetch('/admin/api/assets/upload', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token },
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '이미지 업로드에 실패했습니다.');
+        setValue('uploadedAssetUrl', data.url);
+        status.textContent = '업로드가 완료되었습니다.';
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    }
+
+    function useUploadedAssetUrl() {
+      const status = document.getElementById('assetUploadStatus');
+      const url = value('uploadedAssetUrl');
+      if (!url) {
+        status.textContent = '먼저 이미지를 업로드하세요.';
+        return;
+      }
+      setValue('resourceUrl', url);
+      status.textContent = '자료/링크 URL에 업로드 URL을 입력했습니다.';
     }
 
     document.getElementById('ruleForm').addEventListener('submit', async event => {
