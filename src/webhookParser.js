@@ -36,6 +36,13 @@ function normalizeComment(value, entry, change) {
       entry.id
     ),
     commentId: pickString(commentId),
+    igUserId: pickString(
+      value.ig_user_id,
+      value.igUserId,
+      value.user_id,
+      from.id,
+      value.comment && value.comment.from && value.comment.from.id
+    ),
     username: pickString(
       value.username,
       value.user_name,

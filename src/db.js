@@ -29,6 +29,7 @@ function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       media_id TEXT NOT NULL,
       comment_id TEXT NOT NULL UNIQUE,
+      ig_user_id TEXT NULL,
       username TEXT NULL,
       comment_text TEXT NULL,
       matched_rule_id INTEGER NULL,
@@ -76,6 +77,15 @@ function initDatabase() {
   addColumnIfMissing('reply_logs', 'public_reply_status', 'TEXT');
   addColumnIfMissing('reply_logs', 'public_reply_error_message', 'TEXT');
   addColumnIfMissing('reply_logs', 'public_replied_at', 'TEXT');
+  addColumnIfMissing('reply_logs', 'ig_user_id', 'TEXT');
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_reply_logs_user_media_status
+    ON reply_logs(ig_user_id, media_id, status);
+
+    CREATE INDEX IF NOT EXISTS idx_reply_logs_user_rule_status
+    ON reply_logs(ig_user_id, matched_rule_id, status);
+  `);
 }
 
 function addColumnIfMissing(tableName, columnName, columnType) {

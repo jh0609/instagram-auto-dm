@@ -14,7 +14,7 @@ process.env.IG_BUSINESS_ID = '';
 process.env.IG_BUSINESS_ACCESS_TOKEN = '';
 
 const { db, initDatabase } = require('../src/db');
-const { findMatchingRule, renderTemplate } = require('../src/replyService');
+const { processComment, findUserDuplicate, findMatchingRule, renderTemplate } = require('../src/replyService');
 
 initDatabase();
 
@@ -64,7 +64,8 @@ assert(
   'template rendering failed'
 );
 
-verifyAdminRoutes()
+verifyDuplicatePolicy()
+  .then(verifyAdminRoutes)
   .then(() => {
     db.close();
     for (const suffix of ['', '-shm', '-wal']) {
@@ -179,4 +180,47 @@ async function verifyAdminRoutes() {
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+}
+
+async function verifyDuplicatePolicy() {
+  const sentLog = db.prepare(`
+    INSERT INTO reply_logs (
+      media_id, comment_id, ig_user_id, username, comment_text, matched_rule_id,
+      reply_text, status, created_at, replied_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  `).run('media-a', 'already-sent-comment', 'ig-user-1', 'tester', 'please send guide', mediaRule.id, 'sent');
+
+  const skipped = await processComment({
+    mediaId: 'media-a',
+    commentId: 'new-duplicate-comment',
+    igUserId: 'ig-user-1',
+    username: 'tester',
+    text: 'please send guide',
+    rawPayload: { verify: true }
+  });
+  assert(skipped.status === 'skipped', 'same ig_user_id + media_id should be skipped');
+
+  const skippedLog = db.prepare('SELECT status, ig_user_id, error_message FROM reply_logs WHERE comment_id = ?')
+    .get('new-duplicate-comment');
+  assert(skippedLog.status === 'skipped', 'skipped duplicate should be logged');
+  assert(skippedLog.ig_user_id === 'ig-user-1', 'skipped log should store ig_user_id');
+  assert(skippedLog.error_message === 'Duplicate user/media skipped', 'skipped log should store duplicate reason');
+
+  const otherMediaDuplicate = findUserDuplicate({
+    igUserId: 'ig-user-1',
+    mediaId: 'media-other',
+    ruleId: mediaRule.id
+  });
+  assert(otherMediaDuplicate === null, 'same user on different media should not be blocked by user/media policy');
+
+  const noUserDuplicate = findUserDuplicate({
+    igUserId: null,
+    mediaId: 'media-a',
+    ruleId: mediaRule.id
+  });
+  assert(noUserDuplicate === null, 'missing ig_user_id should only use comment_id duplicate policy');
+
+  const savedUserId = db.prepare('SELECT ig_user_id FROM reply_logs WHERE id = ?').get(sentLog.lastInsertRowid);
+  assert(savedUserId.ig_user_id === 'ig-user-1', 'reply_logs should store ig_user_id');
 }

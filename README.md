@@ -39,6 +39,8 @@ POLLING_INTERVAL_SECONDS=60
 PUBLIC_COMMENT_REPLY_ENABLED=false
 PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
 ADMIN_TOKEN=change-this-admin-token
+ALLOW_REPEAT_PER_USER_PER_MEDIA=false
+ALLOW_REPEAT_PER_USER_PER_RULE=true
 ```
 
 토큰 용도:
@@ -48,6 +50,7 @@ ADMIN_TOKEN=change-this-admin-token
 
 토큰 값은 로그에 출력하지 않습니다.
 `ADMIN_TOKEN`은 `/admin`과 `/admin/api/*` 접근에 사용하는 간단한 관리용 토큰입니다.
+`ALLOW_REPEAT_PER_USER_PER_MEDIA=false`이면 같은 Instagram 사용자가 같은 게시글에 여러 댓글을 달아도 DM은 한 번만 발송합니다. `ALLOW_REPEAT_PER_USER_PER_RULE=false`이면 같은 사용자가 같은 rule에 여러 번 매칭되어도 DM은 한 번만 발송합니다.
 
 ## npm scripts
 
@@ -334,3 +337,7 @@ npm run init-db
 ## 중복 발송 방지
 
 `reply_logs.comment_id`는 `UNIQUE`입니다. 이미 처리한 `comment_id`는 `duplicate`로 스킵되어 같은 댓글에 Private Reply를 중복 발송하지 않습니다.
+
+Webhook payload에 Instagram 사용자 ID가 포함된 경우에는 사용자 기준 중복 발송도 차단할 수 있습니다. 기본값은 같은 사용자와 같은 게시글 조합에 대해 이미 `status='sent'` 이력이 있으면 새 DM을 발송하지 않는 방식입니다.
+
+중복 차단으로 발송하지 않은 댓글은 `reply_logs.status='skipped'`로 저장됩니다. `skipped`는 오류가 아니라 중복 발송 방지 정책에 따라 정상적으로 발송을 생략한 상태입니다. 중복 판단은 `status='sent'` 이력만 기준으로 하며, `failed`나 `skipped` 이력은 차단 기준에 포함하지 않습니다.

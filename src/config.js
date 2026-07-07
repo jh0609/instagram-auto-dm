@@ -17,7 +17,9 @@ const config = {
   pollingIntervalSeconds: Number(process.env.POLLING_INTERVAL_SECONDS || 60),
   publicCommentReplyEnabled: String(process.env.PUBLIC_COMMENT_REPLY_ENABLED || 'false').toLowerCase() === 'true',
   publicCommentReplyText: process.env.PUBLIC_COMMENT_REPLY_TEXT || 'DM으로 보내드렸어요!',
-  adminToken: process.env.ADMIN_TOKEN || ''
+  adminToken: process.env.ADMIN_TOKEN || '',
+  allowRepeatPerUserPerMedia: String(process.env.ALLOW_REPEAT_PER_USER_PER_MEDIA || 'false').toLowerCase() === 'true',
+  allowRepeatPerUserPerRule: String(process.env.ALLOW_REPEAT_PER_USER_PER_RULE || 'true').toLowerCase() === 'true'
 };
 
 module.exports = config;

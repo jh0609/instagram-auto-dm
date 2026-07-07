@@ -174,6 +174,7 @@ async function handleWebhookPayload(payload, rawBody) {
         await processComment({
           mediaId: comment.mediaId,
           commentId: comment.commentId,
+          igUserId: comment.igUserId,
           username: comment.username,
           text: comment.text,
           rawPayload: comment.rawPayload

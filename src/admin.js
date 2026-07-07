@@ -100,6 +100,7 @@ function createAdminRouter() {
     const offset = (page - 1) * pageSize;
     const rows = db.prepare(`
       SELECT l.id, l.media_id, l.comment_id, l.username,
+             l.ig_user_id,
              r.keyword AS matched_keyword,
              l.matched_rule_id AS rule_id,
              l.status, l.reply_text, l.public_reply_text, l.error_message,
@@ -398,6 +399,7 @@ function renderAdminPage(token) {
     const labels = {
       id: 'ID',
       media_id: '게시글 ID',
+      ig_user_id: 'Instagram 사용자 ID',
       keyword: '댓글 키워드',
       priority: '우선순위',
       enabled_yn: '사용 여부',
@@ -557,7 +559,7 @@ function renderAdminPage(token) {
       logsState.pageSize = result.page_size;
       logsState.totalPages = result.total_pages;
       renderTable(document.getElementById('logs'), data, [
-        'id', 'created_at', 'status', 'media_id', 'comment_id', 'username', 'matched_keyword', 'rule_id', 'reply_text', 'public_reply_text', 'error_message'
+        'id', 'created_at', 'status', 'media_id', 'comment_id', 'ig_user_id', 'username', 'matched_keyword', 'rule_id', 'reply_text', 'public_reply_text', 'error_message'
       ]);
       document.getElementById('logsPageInfo').textContent =
         logsState.page + ' / ' + logsState.totalPages + ' 페이지, 총 ' + result.total + '건';

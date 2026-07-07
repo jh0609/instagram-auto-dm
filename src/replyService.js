@@ -39,6 +39,7 @@ function renderTemplate(template, context) {
 
 function insertLog(input) {
   const row = {
+    igUserId: null,
     publicReplyText: null,
     publicReplyCommentId: null,
     publicReplyStatus: null,
@@ -50,13 +51,13 @@ function insertLog(input) {
   db.prepare(`
     INSERT INTO reply_logs (
       media_id, comment_id, username, comment_text, matched_rule_id,
-      reply_text, recipient_id, message_id, status, error_message,
+      ig_user_id, reply_text, recipient_id, message_id, status, error_message,
       raw_payload, replied_at, public_reply_text, public_reply_comment_id,
       public_reply_status, public_reply_error_message, public_replied_at
     )
     VALUES (
       @mediaId, @commentId, @username, @commentText, @matchedRuleId,
-      @replyText, @recipientId, @messageId, @status, @errorMessage,
+      @igUserId, @replyText, @recipientId, @messageId, @status, @errorMessage,
       @rawPayload, @repliedAt, @publicReplyText, @publicReplyCommentId,
       @publicReplyStatus, @publicReplyErrorMessage, @publicRepliedAt
     )
@@ -124,7 +125,37 @@ async function createPublicCommentReply({
   }
 }
 
-async function processComment({ mediaId, commentId, username = null, text = null, rawPayload = null }) {
+function findUserDuplicate({ igUserId, mediaId, ruleId }) {
+  if (!igUserId) return null;
+
+  if (!config.allowRepeatPerUserPerMedia) {
+    const existing = db.prepare(`
+      SELECT id
+      FROM reply_logs
+      WHERE ig_user_id = ?
+        AND media_id = ?
+        AND status = 'sent'
+      LIMIT 1
+    `).get(igUserId, mediaId);
+    if (existing) return { reason: 'Duplicate user/media skipped', existingLogId: existing.id };
+  }
+
+  if (!config.allowRepeatPerUserPerRule) {
+    const existing = db.prepare(`
+      SELECT id
+      FROM reply_logs
+      WHERE ig_user_id = ?
+        AND matched_rule_id = ?
+        AND status = 'sent'
+      LIMIT 1
+    `).get(igUserId, ruleId);
+    if (existing) return { reason: 'Duplicate user/rule skipped', existingLogId: existing.id };
+  }
+
+  return null;
+}
+
+async function processComment({ mediaId, commentId, igUserId = null, username = null, text = null, rawPayload = null }) {
   const payloadText = stringifyPayload(rawPayload);
 
   try {
@@ -144,6 +175,7 @@ async function processComment({ mediaId, commentId, username = null, text = null
       insertLog({
         mediaId,
         commentId,
+        igUserId,
         username,
         commentText: text,
         matchedRuleId: null,
@@ -171,6 +203,43 @@ async function processComment({ mediaId, commentId, username = null, text = null
       matchedRule.public_reply_text || config.publicCommentReplyText,
       templateContext
     );
+    const duplicate = findUserDuplicate({
+      igUserId,
+      mediaId,
+      ruleId: matchedRule.id
+    });
+    if (duplicate) {
+      insertLog({
+        mediaId,
+        commentId,
+        igUserId,
+        username,
+        commentText: text,
+        matchedRuleId: matchedRule.id,
+        replyText,
+        recipientId: null,
+        messageId: null,
+        status: 'skipped',
+        errorMessage: duplicate.reason,
+        rawPayload: payloadText,
+        repliedAt: null,
+        publicReplyText
+      });
+      logger.info('Duplicate user reply skipped', {
+        mediaId,
+        commentId,
+        igUserId,
+        ruleId: matchedRule.id,
+        reason: duplicate.reason,
+        existingLogId: duplicate.existingLogId
+      });
+      return {
+        status: 'skipped',
+        commentId,
+        ruleId: matchedRule.id,
+        errorMessage: duplicate.reason
+      };
+    }
 
     try {
       const result = await sendPrivateReply(commentId, replyText);
@@ -182,6 +251,7 @@ async function processComment({ mediaId, commentId, username = null, text = null
       insertLog({
         mediaId,
         commentId,
+        igUserId,
         username,
         commentText: text,
         matchedRuleId: matchedRule.id,
@@ -201,6 +271,7 @@ async function processComment({ mediaId, commentId, username = null, text = null
       insertLog({
         mediaId,
         commentId,
+        igUserId,
         username,
         commentText: text,
         matchedRuleId: matchedRule.id,
@@ -225,6 +296,7 @@ async function processComment({ mediaId, commentId, username = null, text = null
         insertLog({
           mediaId,
           commentId,
+          igUserId,
           username,
           commentText: text,
           matchedRuleId: null,
@@ -345,6 +417,7 @@ async function retryFailedReplies(limit = 10) {
 module.exports = {
   processComment,
   retryFailedReplies,
+  findUserDuplicate,
   findMatchingRule,
   renderTemplate
 };
