@@ -1,6 +1,6 @@
 # instagram-auto-dm
 
-Instagram 게시물 댓글에 특정 키워드가 달리면 Instagram Private Reply를 자동 발송하는 독립 Node.js 서버입니다. Webhook 수신과 polling을 모두 지원하며, 댓글 처리 로직은 `processComment()`로 공통화되어 있습니다.
+Instagram 게시물 댓글에 특정 키워드가 달리면 Instagram Private Reply를 자동 발송하는 독립 Node.js 서버입니다. 운영 기본 흐름은 Webhook 수신이며, 댓글 처리 로직은 `processComment()`로 공통화되어 있습니다.
 
 ## 설치
 
@@ -42,8 +42,8 @@ PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
 
 토큰 용도:
 
-- `FB_PAGE_ACCESS_TOKEN`: 댓글 조회, polling, fallback 조회, 공개 댓글 답글 작성에 사용합니다.
-- `IG_BUSINESS_ACCESS_TOKEN`: Instagram Private Reply 발송에 사용합니다.
+- `FB_PAGE_ACCESS_TOKEN`: polling 방식의 댓글 조회가 필요할 때만 사용합니다. Webhook만 사용하면 비워둘 수 있습니다.
+- `IG_BUSINESS_ACCESS_TOKEN`: Instagram Private Reply 발송과 공개 댓글 답글 작성에 사용합니다.
 
 토큰 값은 로그에 출력하지 않습니다.
 
@@ -93,7 +93,7 @@ Meta timeout 방지를 위해 요청 수신 즉시 `200 OK`를 반환하고, 이
 
 ### POST /dev/poll-once
 
-개발용 polling endpoint입니다.
+개발용 polling endpoint입니다. 현재 운영 기본값은 `POLLING_ENABLED=false`이며, Webhook만 사용할 경우 이 endpoint를 사용할 필요가 없습니다.
 
 ```bash
 curl -X POST http://localhost:3010/dev/poll-once \
@@ -149,6 +149,8 @@ https://YOUR-NGROK-DOMAIN/webhooks/instagram
 ```
 
 ## Polling 테스트
+
+Polling은 기본 비활성화되어 있습니다. Webhook 대신 댓글 조회를 직접 테스트해야 할 때만 사용합니다.
 
 CLI:
 

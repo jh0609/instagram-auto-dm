@@ -47,10 +47,10 @@ async function fetchComments(mediaId) {
 async function replyToComment(commentId, message) {
   requireValue(commentId, 'commentId');
   requireValue(message, 'message');
-  requireValue(config.fbPageAccessToken, 'FB_PAGE_ACCESS_TOKEN');
+  requireValue(config.igBusinessAccessToken, 'IG_BUSINESS_ACCESS_TOKEN');
 
-  const url = new URL(`https://graph.facebook.com/${config.fbGraphVersion}/${commentId}/replies`);
-  url.searchParams.set('access_token', config.fbPageAccessToken);
+  const url = new URL(`https://graph.facebook.com/${config.igGraphVersion}/${commentId}/replies`);
+  url.searchParams.set('access_token', config.igBusinessAccessToken);
 
   const data = await fetchJson(url, {
     method: 'POST',
