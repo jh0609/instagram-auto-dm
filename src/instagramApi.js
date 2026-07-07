@@ -18,14 +18,38 @@ async function fetchJson(url, options) {
     data = text;
   }
 
+  logGraphUsageHeaders(url, response);
+
   if (!response.ok) {
     const error = new Error(`Graph API request failed with ${response.status}`);
     error.status = response.status;
     error.data = data;
+    error.isRateLimit = isRateLimitError(error);
     throw error;
   }
 
   return data;
+}
+
+function logGraphUsageHeaders(url, response) {
+  const appUsage = response.headers.get('x-app-usage');
+  const pageUsage = response.headers.get('x-page-usage');
+  if (!appUsage && !pageUsage) return;
+
+  logger.info('Graph API usage headers', {
+    pathname: url && url.pathname ? url.pathname : String(url),
+    xAppUsage: parseUsageHeader(appUsage),
+    xPageUsage: parseUsageHeader(pageUsage)
+  });
+}
+
+function parseUsageHeader(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 function sleep(ms) {
@@ -132,6 +156,8 @@ async function sendPrivateReply(commentId, replyText) {
 }
 
 function isRetryablePrivateReplyError(error) {
+  if (isRateLimitError(error)) return false;
+
   const graphCode = getGraphErrorCode(error);
   const networkCode = error && (error.code || error.cause && error.cause.code);
   const networkMessage = error && error.message ? error.message : '';
@@ -147,6 +173,17 @@ function isRetryablePrivateReplyError(error) {
     networkCode === 'UND_ERR_BODY_TIMEOUT' ||
     /timeout/i.test(networkMessage) ||
     error && error.name === 'AbortError'
+  );
+}
+
+function isRateLimitError(error) {
+  const graphCode = getGraphErrorCode(error);
+  return Boolean(
+    error && error.status === 429 ||
+    graphCode === 4 ||
+    graphCode === 17 ||
+    graphCode === 32 ||
+    graphCode === 613
   );
 }
 
@@ -173,5 +210,6 @@ module.exports = {
   replyToComment,
   sendPrivateReply,
   formatApiError,
+  isRateLimitError,
   isRetryablePrivateReplyError
 };

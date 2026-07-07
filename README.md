@@ -41,6 +41,7 @@ PUBLIC_COMMENT_REPLY_TEXT=DM으로 보내드렸어요!
 ADMIN_TOKEN=change-this-admin-token
 ALLOW_REPEAT_PER_USER_PER_MEDIA=false
 ALLOW_REPEAT_PER_USER_PER_RULE=true
+MEDIA_CACHE_TTL_SECONDS=300
 ```
 
 토큰 용도:
@@ -51,6 +52,7 @@ ALLOW_REPEAT_PER_USER_PER_RULE=true
 토큰 값은 로그에 출력하지 않습니다.
 `ADMIN_TOKEN`은 `/admin`과 `/admin/api/*` 접근에 사용하는 간단한 관리용 토큰입니다.
 `ALLOW_REPEAT_PER_USER_PER_MEDIA=false`이면 같은 Instagram 사용자가 같은 게시글에 여러 댓글을 달아도 DM은 한 번만 발송합니다. `ALLOW_REPEAT_PER_USER_PER_RULE=false`이면 같은 사용자가 같은 rule에 여러 번 매칭되어도 DM은 한 번만 발송합니다.
+`MEDIA_CACHE_TTL_SECONDS`는 Admin 게시글 목록 조회 캐시 시간입니다. 기본값은 300초입니다.
 
 ## npm scripts
 
@@ -187,7 +189,20 @@ curl "http://localhost:3010/admin/api/media/resolve?permalink=https%3A%2F%2Fwww.
 
 `/admin/api/logs`는 `page`, `page_size`, `total`, `total_pages`를 함께 반환합니다. `page_size`는 최대 100입니다.
 
-`/admin/api/media`는 `IG_BUSINESS_ID`와 `IG_BUSINESS_ACCESS_TOKEN`으로 `graph.instagram.com/{IG_GRAPH_VERSION}/{IG_BUSINESS_ID}/media`를 호출합니다. `limit`은 기본 25이며 최대 100입니다. `/admin/api/media/resolve`는 입력한 Instagram permalink와 내 media 목록의 permalink를 비교해 `media_id`를 찾으며, URL 끝의 slash 유무는 무시합니다. `/p/{shortcode}`, `/reel/{shortcode}`, `/tv/{shortcode}` 형식을 지원하고 query string/hash는 제거해 비교합니다.
+`/admin/api/media`는 `IG_BUSINESS_ID`와 `IG_BUSINESS_ACCESS_TOKEN`으로 `graph.instagram.com/{IG_GRAPH_VERSION}/{IG_BUSINESS_ID}/media`를 호출합니다. `limit`은 기본 25이며 최대 100입니다. media 목록은 rate limit 방지를 위해 기본 5분간 메모리에 캐시됩니다. 강제로 새로 조회하려면 `?force=true`를 붙입니다.
+
+`/admin/api/media/resolve`는 캐시된 media 목록을 우선 사용하며, 입력한 Instagram permalink와 내 media 목록의 permalink를 비교해 `media_id`를 찾습니다. URL 끝의 slash 유무는 무시합니다. `/p/{shortcode}`, `/reel/{shortcode}`, `/tv/{shortcode}` 형식을 지원하고 query string/hash는 제거해 비교합니다. resolve도 `?force=true`를 붙이면 캐시를 무시하고 새로 조회합니다.
+
+## Rate Limit 대응
+
+모든 Graph API 응답에서 `x-app-usage`, `x-page-usage` 헤더가 있으면 서버 로그에 남깁니다. 로그에는 URL 전체를 남기지 않고 pathname만 기록하므로 `access_token` query 값이 노출되지 않습니다.
+
+아래 응답은 rate limit 계열 오류로 분류합니다.
+
+- HTTP `429`
+- Graph API error code `4`, `17`, `32`, `613`
+
+Rate limit 오류는 즉시 반복 재시도하지 않습니다. 운영 중 Admin의 게시글 목록 조회는 캐시를 사용하고, 불필요한 `force=true` 호출을 반복하지 않는 것을 권장합니다.
 
 ## 공개 댓글 답글
 

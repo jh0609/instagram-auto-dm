@@ -19,7 +19,8 @@ const config = {
   publicCommentReplyText: process.env.PUBLIC_COMMENT_REPLY_TEXT || 'DM으로 보내드렸어요!',
   adminToken: process.env.ADMIN_TOKEN || '',
   allowRepeatPerUserPerMedia: String(process.env.ALLOW_REPEAT_PER_USER_PER_MEDIA || 'false').toLowerCase() === 'true',
-  allowRepeatPerUserPerRule: String(process.env.ALLOW_REPEAT_PER_USER_PER_RULE || 'true').toLowerCase() === 'true'
+  allowRepeatPerUserPerRule: String(process.env.ALLOW_REPEAT_PER_USER_PER_RULE || 'true').toLowerCase() === 'true',
+  mediaCacheTtlSeconds: Number(process.env.MEDIA_CACHE_TTL_SECONDS || 300)
 };
 
 module.exports = config;

@@ -2,7 +2,10 @@ const express = require('express');
 const config = require('./config');
 const { db } = require('./db');
 const { fetchMedia } = require('./instagramApi');
+const { createMediaCache } = require('./mediaCache');
 const { findMatchingRule, renderTemplate } = require('./replyService');
+
+const mediaCache = createMediaCache(fetchMedia, config.mediaCacheTtlSeconds);
 
 function createAdminRouter() {
   const router = express.Router();
@@ -121,8 +124,10 @@ function createAdminRouter() {
 
   router.get('/api/media', async (req, res) => {
     try {
-      const media = await fetchMedia(clampLimit(req.query.limit, 25, 100));
-      return res.json({ data: media });
+      const result = await mediaCache.get(clampLimit(req.query.limit, 25, 100), {
+        force: isForceRefresh(req.query)
+      });
+      return res.json({ data: result.data, cache: result.cache });
     } catch (error) {
       return res.status(500).json({ error: error.message || 'Failed to fetch media' });
     }
@@ -133,11 +138,14 @@ function createAdminRouter() {
     if (!permalink) return res.status(400).json({ error: 'permalink is required' });
 
     try {
-      const media = await fetchMedia(clampLimit(req.query.limit, 100, 100));
+      const result = await mediaCache.get(clampLimit(req.query.limit, 100, 100), {
+        force: isForceRefresh(req.query)
+      });
+      const media = result.data;
       const normalizedPermalink = normalizePermalink(permalink);
       const matched = media.find((item) => normalizePermalink(item.permalink) === normalizedPermalink);
       if (!matched) return res.status(404).json({ error: 'Media not found' });
-      return res.json({ data: matched });
+      return res.json({ data: matched, cache: result.cache });
     } catch (error) {
       return res.status(500).json({ error: error.message || 'Failed to resolve media' });
     }
@@ -268,6 +276,11 @@ function clampPage(value) {
   const number = Number(value || 1);
   if (!Number.isInteger(number) || number <= 0) return 1;
   return number;
+}
+
+function isForceRefresh(query) {
+  const value = String(query.force || query.refresh || '').toLowerCase();
+  return value === '1' || value === 'true' || value === 'y' || value === 'yes';
 }
 
 function renderAdminPage(token) {

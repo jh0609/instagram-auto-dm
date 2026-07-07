@@ -14,6 +14,8 @@ process.env.IG_BUSINESS_ID = '';
 process.env.IG_BUSINESS_ACCESS_TOKEN = '';
 
 const { db, initDatabase } = require('../src/db');
+const { isRateLimitError } = require('../src/instagramApi');
+const { createMediaCache } = require('../src/mediaCache');
 const { processComment, findUserDuplicate, findMatchingRule, renderTemplate } = require('../src/replyService');
 
 initDatabase();
@@ -64,7 +66,10 @@ assert(
   'template rendering failed'
 );
 
-verifyDuplicatePolicy()
+verifyRateLimitHelpers();
+
+verifyMediaCache()
+  .then(verifyDuplicatePolicy)
   .then(verifyAdminRoutes)
   .then(() => {
     db.close();
@@ -85,6 +90,34 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function verifyRateLimitHelpers() {
+  assert(isRateLimitError({ status: 429 }) === true, 'HTTP 429 should be rate limit');
+  for (const code of [4, 17, 32, 613]) {
+    assert(
+      isRateLimitError({ data: { error: { code } } }) === true,
+      `Graph error code ${code} should be rate limit`
+    );
+  }
+  assert(isRateLimitError({ status: 500, data: { error: { code: 1 } } }) === false, 'code 1 should not be rate limit');
+}
+
+async function verifyMediaCache() {
+  let calls = 0;
+  const cache = createMediaCache(async (limit) => {
+    calls += 1;
+    return [{ id: `media-${calls}`, limit }];
+  }, 300);
+
+  const first = await cache.get(25);
+  const second = await cache.get(25);
+  const forced = await cache.get(25, { force: true });
+
+  assert(first.cache.hit === false, 'first media cache read should miss');
+  assert(second.cache.hit === true, 'second media cache read should hit');
+  assert(forced.cache.hit === false, 'forced media cache read should miss');
+  assert(calls === 2, 'media cache should avoid repeated fetches unless forced');
 }
 
 async function verifyAdminRoutes() {
