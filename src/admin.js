@@ -17,7 +17,11 @@ function createAdminRouter() {
       SELECT id, media_id, keyword, reply_text, use_yn, created_at, updated_at,
              priority, enabled_yn, public_reply_text, resource_url
       FROM reply_rules
-      ORDER BY enabled_yn DESC, COALESCE(media_id, ''), priority ASC, id DESC
+      ORDER BY
+        CASE WHEN media_id IS NULL THEN 1 ELSE 0 END,
+        media_id,
+        priority,
+        id
     `).all();
     res.json({ data: rows });
   });
@@ -42,7 +46,10 @@ function createAdminRouter() {
     return res.status(201).json({ data: row });
   });
 
-  router.put('/api/rules/:id', (req, res) => {
+  router.patch('/api/rules/:id', updateRule);
+  router.put('/api/rules/:id', updateRule);
+
+  function updateRule(req, res) {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid rule id' });
     if (!getRule(id)) return res.status(404).json({ error: 'Rule not found' });
@@ -66,7 +73,7 @@ function createAdminRouter() {
     `).run(input);
 
     return res.json({ data: getRule(id) });
-  });
+  }
 
   router.delete('/api/rules/:id', (req, res) => {
     const id = Number(req.params.id);
@@ -85,14 +92,16 @@ function createAdminRouter() {
   });
 
   router.get('/api/logs', (req, res) => {
-    const limit = clampLimit(req.query.limit, 50, 200);
+    const limit = clampLimit(req.query.limit, 100, 100);
     const rows = db.prepare(`
-      SELECT id, media_id, comment_id, username, comment_text, matched_rule_id,
-             reply_text, recipient_id, message_id, status, error_message,
-             public_reply_text, public_reply_comment_id, public_reply_status,
-             public_reply_error_message, created_at, replied_at, public_replied_at
-      FROM reply_logs
-      ORDER BY id DESC
+      SELECT l.id, l.media_id, l.comment_id, l.username,
+             r.keyword AS matched_keyword,
+             l.matched_rule_id AS rule_id,
+             l.status, l.reply_text, l.public_reply_text, l.error_message,
+             l.created_at
+      FROM reply_logs l
+      LEFT JOIN reply_rules r ON r.id = l.matched_rule_id
+      ORDER BY l.id DESC
       LIMIT ?
     `).all(limit);
     res.json({ data: rows });
@@ -140,7 +149,7 @@ function createAdminRouter() {
 
 function requireAdminToken(req, res, next) {
   if (!config.adminToken) {
-    return res.status(503).json({ error: 'ADMIN_TOKEN is not configured' });
+    return res.status(500).json({ error: 'ADMIN_TOKEN is not configured' });
   }
 
   const token = getRequestToken(req);
@@ -282,6 +291,7 @@ function renderAdminPage(token) {
 
   <script>
     const token = ${safeToken};
+    localStorage.setItem('adminToken', token);
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token };
 
     async function api(path, options = {}) {
@@ -296,9 +306,24 @@ function renderAdminPage(token) {
 
     async function loadRules() {
       const { data } = await api('/rules');
-      document.getElementById('rules').innerHTML = table(data, [
+      renderTable(document.getElementById('rules'), data, [
         'id', 'media_id', 'keyword', 'priority', 'enabled_yn', 'reply_text', 'public_reply_text', 'resource_url'
-      ], row => '<div class="actions"><button class="secondary" onclick="editRule(' + row.id + ')">Edit</button><button class="danger" onclick="disableRule(' + row.id + ')">Disable</button></div>');
+      ], row => {
+        const wrap = document.createElement('div');
+        wrap.className = 'actions';
+        const edit = document.createElement('button');
+        edit.className = 'secondary';
+        edit.type = 'button';
+        edit.textContent = 'Edit';
+        edit.addEventListener('click', () => editRule(row.id));
+        const disable = document.createElement('button');
+        disable.className = 'danger';
+        disable.type = 'button';
+        disable.textContent = 'Disable';
+        disable.addEventListener('click', () => disableRule(row.id));
+        wrap.append(edit, disable);
+        return wrap;
+      });
       window.rulesCache = data;
     }
 
@@ -340,7 +365,7 @@ function renderAdminPage(token) {
         priority: value('priority'),
         enabled_yn: value('enabledYn')
       };
-      await api(id ? '/rules/' + id : '/rules', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      await api(id ? '/rules/' + id : '/rules', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
       resetRuleForm();
       await loadRules();
     });
@@ -358,26 +383,55 @@ function renderAdminPage(token) {
     });
 
     async function loadLogs() {
-      const { data } = await api('/logs?limit=50');
-      document.getElementById('logs').innerHTML = table(data, [
-        'id', 'created_at', 'status', 'media_id', 'comment_id', 'username', 'matched_rule_id', 'reply_text', 'public_reply_status', 'error_message'
+      const { data } = await api('/logs');
+      renderTable(document.getElementById('logs'), data, [
+        'id', 'created_at', 'status', 'media_id', 'comment_id', 'username', 'matched_keyword', 'rule_id', 'reply_text', 'public_reply_text', 'error_message'
       ]);
     }
 
-    function table(rows, columns, actionRenderer) {
-      if (!rows.length) return '<p class="muted">No data</p>';
-      return '<table><thead><tr>' + columns.map(col => '<th>' + escapeHtml(col) + '</th>').join('') + (actionRenderer ? '<th>actions</th>' : '') + '</tr></thead><tbody>' +
-        rows.map(row => '<tr>' + columns.map(col => '<td class="mono">' + escapeHtml(row[col]) + '</td>').join('') + (actionRenderer ? '<td>' + actionRenderer(row) + '</td>' : '') + '</tr>').join('') +
-        '</tbody></table>';
-    }
+    function renderTable(target, rows, columns, actionRenderer) {
+      target.replaceChildren();
+      if (!rows.length) {
+        const empty = document.createElement('p');
+        empty.className = 'muted';
+        empty.textContent = 'No data';
+        target.append(empty);
+        return;
+      }
 
-    function escapeHtml(value) {
-      return String(value == null ? '' : value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const column of columns) {
+        const th = document.createElement('th');
+        th.textContent = column;
+        headRow.append(th);
+      }
+      if (actionRenderer) {
+        const th = document.createElement('th');
+        th.textContent = 'actions';
+        headRow.append(th);
+      }
+      thead.append(headRow);
+
+      const tbody = document.createElement('tbody');
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+        for (const column of columns) {
+          const td = document.createElement('td');
+          td.className = 'mono';
+          td.textContent = row[column] == null ? '' : String(row[column]);
+          tr.append(td);
+        }
+        if (actionRenderer) {
+          const td = document.createElement('td');
+          td.append(actionRenderer(row));
+          tr.append(td);
+        }
+        tbody.append(tr);
+      }
+      table.append(thead, tbody);
+      target.append(table);
     }
 
     loadRules().catch(alert);

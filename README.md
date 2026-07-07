@@ -147,9 +147,9 @@ Admin API:
 
 - `GET /admin/api/rules`
 - `POST /admin/api/rules`
-- `PUT /admin/api/rules/:id`
+- `PATCH /admin/api/rules/:id`
 - `DELETE /admin/api/rules/:id`
-- `GET /admin/api/logs?limit=50`
+- `GET /admin/api/logs`
 - `POST /admin/api/test-match`
 
 `DELETE /admin/api/rules/:id`는 실제 삭제하지 않고 `enabled_yn='N'`으로 비활성화합니다. Rule 생성/수정 시 `keyword`, `reply_text`는 필수이며, `media_id` 빈 문자열은 `NULL`로 저장됩니다. `priority` 기본값은 `100`이고 `enabled_yn`은 `Y` 또는 `N`만 허용합니다.

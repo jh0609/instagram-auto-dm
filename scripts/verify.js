@@ -102,6 +102,46 @@ async function verifyAdminRoutes() {
     });
     assert(rules.status === 200, 'admin rules API should load with bearer token');
 
+    const createdRule = await fetch(`${baseUrl}/admin/api/rules`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer verify-admin-token',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        media_id: '',
+        keyword: 'admin',
+        reply_text: 'admin reply {{username}}',
+        priority: '',
+        enabled_yn: 'Y'
+      })
+    });
+    const createdRuleBody = await createdRule.json();
+    assert(createdRule.status === 201 && createdRuleBody.data.media_id === null, 'admin rule create should normalize empty media_id');
+
+    const patchedRule = await fetch(`${baseUrl}/admin/api/rules/${createdRuleBody.data.id}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer verify-admin-token',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        media_id: 'media-admin',
+        keyword: 'admin',
+        reply_text: 'patched {{username}}',
+        priority: 5,
+        enabled_yn: 'Y'
+      })
+    });
+    const patchedRuleBody = await patchedRule.json();
+    assert(patchedRule.status === 200 && patchedRuleBody.data.priority === 5, 'admin rule patch should update rule');
+
+    const logs = await fetch(`${baseUrl}/admin/api/logs`, {
+      headers: { Authorization: 'Bearer verify-admin-token' }
+    });
+    const logsBody = await logs.json();
+    assert(logs.status === 200 && Array.isArray(logsBody.data), 'admin logs API should return data array');
+
     const testMatch = await fetch(`${baseUrl}/admin/api/test-match`, {
       method: 'POST',
       headers: {
@@ -117,6 +157,13 @@ async function verifyAdminRoutes() {
     });
     const result = await testMatch.json();
     assert(testMatch.status === 200 && result.matched === true, 'admin test-match should return rendered match');
+
+    const disabledRule = await fetch(`${baseUrl}/admin/api/rules/${createdRuleBody.data.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer verify-admin-token' }
+    });
+    const disabledRuleBody = await disabledRule.json();
+    assert(disabledRule.status === 200 && disabledRuleBody.data.enabled_yn === 'N', 'admin delete should disable rule');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
