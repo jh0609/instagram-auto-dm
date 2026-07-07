@@ -1,0 +1,21 @@
+{
+  "name": "instagram-auto-dm",
+  "version": "0.1.0",
+  "description": "Instagram comment keyword auto private reply server",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "init-db": "node scripts/init-db.js",
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "poll-once": "node scripts/poll-once.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
