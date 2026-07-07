@@ -349,6 +349,58 @@ npm run init-db
 - `public_reply_text`
 - `resource_url`
 
+## DB 백업
+
+수동 백업:
+
+```bash
+chmod +x scripts/backup-db.sh
+./scripts/backup-db.sh
+```
+
+기본 DB 경로는 `data/instagram_auto_dm.sqlite`입니다. `SQLITE_PATH`를 지정하면 해당 DB를 백업합니다.
+
+```bash
+SQLITE_PATH=/opt/instagram-auto-dm/data/instagram_auto_dm.sqlite ./scripts/backup-db.sh
+```
+
+백업 파일은 `backups/instagram_auto_dm.YYYYMMDD_HHMMSS.sqlite` 형식으로 생성됩니다. 스크립트는 `sqlite3 ".backup"` 명령을 사용하므로 실행 중인 SQLite DB도 안전하게 백업할 수 있습니다. 백업은 최신 14개만 유지하고 나머지는 삭제합니다.
+
+systemd timer 예시:
+
+```ini
+# /etc/systemd/system/instagram-auto-dm-backup.service
+[Unit]
+Description=Backup instagram-auto-dm SQLite database
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/instagram-auto-dm
+Environment=SQLITE_PATH=/opt/instagram-auto-dm/data/instagram_auto_dm.sqlite
+ExecStart=/opt/instagram-auto-dm/scripts/backup-db.sh
+```
+
+```ini
+# /etc/systemd/system/instagram-auto-dm-backup.timer
+[Unit]
+Description=Run instagram-auto-dm SQLite backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+등록:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now instagram-auto-dm-backup.timer
+systemctl list-timers instagram-auto-dm-backup.timer
+```
+
 ## 중복 발송 방지
 
 `reply_logs.comment_id`는 `UNIQUE`입니다. 이미 처리한 `comment_id`는 `duplicate`로 스킵되어 같은 댓글에 Private Reply를 중복 발송하지 않습니다.

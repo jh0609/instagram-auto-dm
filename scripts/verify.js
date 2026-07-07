@@ -67,6 +67,7 @@ assert(
 );
 
 verifyRateLimitHelpers();
+verifyBackupScript();
 
 verifyMediaCache()
   .then(verifyDuplicatePolicy)
@@ -101,6 +102,18 @@ function verifyRateLimitHelpers() {
     );
   }
   assert(isRateLimitError({ status: 500, data: { error: { code: 1 } } }) === false, 'code 1 should not be rate limit');
+}
+
+function verifyBackupScript() {
+  const scriptPath = path.join(process.cwd(), 'scripts', 'backup-db.sh');
+  assert(fs.existsSync(scriptPath), 'backup-db.sh should exist');
+  const content = fs.readFileSync(scriptPath, 'utf8');
+  assert(content.includes('sqlite3') && content.includes('.backup'), 'backup-db.sh should use sqlite3 .backup');
+
+  if (process.platform !== 'win32') {
+    const mode = fs.statSync(scriptPath).mode;
+    assert((mode & 0o111) !== 0, 'backup-db.sh should be executable');
+  }
 }
 
 async function verifyMediaCache() {
